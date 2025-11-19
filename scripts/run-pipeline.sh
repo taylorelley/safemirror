@@ -24,20 +24,9 @@ DISTRIBUTION="${DISTRIBUTION:-jammy}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 APTLY_POOL="${APTLY_POOL:-/var/lib/aptly/pool}"
 
-# Logging
-TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
-DATE_SUFFIX=$(date +%Y%m%d)
-LOG_FILE="${LOG_DIR}/pipeline-${DATE_SUFFIX}.log"
-
-mkdir -p "${LOG_DIR}"
-
-log() {
-    echo "${TIMESTAMP} [INFO] [run-pipeline] $*" | tee -a "${LOG_FILE}"
-}
-
-log_error() {
-    echo "${TIMESTAMP} [ERROR] [run-pipeline] $*" | tee -a "${LOG_FILE}" >&2
-}
+# Set script name for logging and source shared utilities
+SCRIPT_NAME="run-pipeline"
+source "${SCRIPT_DIR}/lib/common.sh"
 
 # Cleanup on exit
 cleanup() {

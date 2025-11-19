@@ -16,20 +16,13 @@ SNAPSHOTS_DIR="${SNAPSHOTS_DIR:-/opt/apt-mirror-system/snapshots}"
 OLD_SNAPSHOT="${1:-}"
 NEW_SNAPSHOT="${2:-}"
 
-# Logging
-TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
-DATE_SUFFIX=$(date +%Y%m%d)
-LOG_FILE="${LOG_DIR}/detect-changes-${DATE_SUFFIX}.log"
+# Set script name for logging and source shared utilities
+SCRIPT_NAME="detect-changes"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
 
-mkdir -p "${LOG_DIR}" "${SNAPSHOTS_DIR}"
-
-log() {
-    echo "${TIMESTAMP} [INFO] [detect-changes] $*" | tee -a "${LOG_FILE}"
-}
-
-log_error() {
-    echo "${TIMESTAMP} [ERROR] [detect-changes] $*" | tee -a "${LOG_FILE}" >&2
-}
+# Ensure snapshots directory exists
+mkdir -p "${SNAPSHOTS_DIR}"
 
 # Validate arguments
 if [ -z "${OLD_SNAPSHOT}" ] || [ -z "${NEW_SNAPSHOT}" ]; then

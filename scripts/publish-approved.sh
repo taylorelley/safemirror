@@ -17,46 +17,10 @@ LOG_DIR="${LOG_DIR:-/opt/apt-mirror-system/logs}"
 MAX_RETRIES="${MAX_RETRIES:-4}"
 RETRY_DELAY="${RETRY_DELAY:-2}"
 
-# Logging
-TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
-DATE_SUFFIX=$(date +%Y%m%d)
-LOG_FILE="${LOG_DIR}/publish-${DATE_SUFFIX}.log"
-
-mkdir -p "${LOG_DIR}"
-
-log() {
-    echo "${TIMESTAMP} [INFO] [publish-approved] $*" | tee -a "${LOG_FILE}"
-}
-
-log_error() {
-    echo "${TIMESTAMP} [ERROR] [publish-approved] $*" | tee -a "${LOG_FILE}" >&2
-}
-
-retry_command() {
-    local cmd="$*"
-    local attempt=1
-    local delay="${RETRY_DELAY}"
-
-    while [ ${attempt} -le ${MAX_RETRIES} ]; do
-        log "Attempt ${attempt}/${MAX_RETRIES}: ${cmd}"
-
-        if eval "${cmd}"; then
-            log "Command succeeded: ${cmd}"
-            return 0
-        fi
-
-        if [ ${attempt} -lt ${MAX_RETRIES} ]; then
-            log "Command failed, retrying in ${delay}s..."
-            sleep "${delay}"
-            delay=$((delay * 2))
-        fi
-
-        attempt=$((attempt + 1))
-    done
-
-    log_error "Command failed after ${MAX_RETRIES} attempts: ${cmd}"
-    return 1
-}
+# Set script name for logging and source shared utilities
+SCRIPT_NAME="publish-approved"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
 
 # Validate arguments
 if [ -z "${SOURCE_SNAPSHOT}" ]; then
@@ -116,8 +80,8 @@ else
     done < "${APPROVED_LIST}"
 fi
 
-# Create filtered snapshot
-if ! retry_command "aptly snapshot filter ${SOURCE_SNAPSHOT} ${APPROVED_SNAPSHOT} '${FILTER_QUERY}'"; then
+# Create filtered snapshot (FILTER_QUERY safely passed as parameter)
+if ! retry_command aptly snapshot filter "${SOURCE_SNAPSHOT}" "${APPROVED_SNAPSHOT}" "${FILTER_QUERY}"; then
     log_error "Failed to create filtered snapshot"
     exit 1
 fi
@@ -137,28 +101,30 @@ fi
 if [ "${PUBLISH_EXISTS}" = true ]; then
     # Switch existing publication to new snapshot
     if [ -n "${GPG_KEY_ID}" ]; then
-        GPG_ARGS="-gpg-key=${GPG_KEY_ID}"
+        if ! retry_command aptly publish switch -gpg-key="${GPG_KEY_ID}" "${DISTRIBUTION}" "${APPROVED_SNAPSHOT}"; then
+            log_error "Failed to switch publication to ${APPROVED_SNAPSHOT}"
+            exit 1
+        fi
     else
-        GPG_ARGS=""
-    fi
-
-    if ! retry_command "aptly publish switch ${GPG_ARGS} ${DISTRIBUTION} ${APPROVED_SNAPSHOT}"; then
-        log_error "Failed to switch publication to ${APPROVED_SNAPSHOT}"
-        exit 1
+        if ! retry_command aptly publish switch "${DISTRIBUTION}" "${APPROVED_SNAPSHOT}"; then
+            log_error "Failed to switch publication to ${APPROVED_SNAPSHOT}"
+            exit 1
+        fi
     fi
 
     log "Publication switched to ${APPROVED_SNAPSHOT}"
 else
     # Create new publication
     if [ -n "${GPG_KEY_ID}" ]; then
-        GPG_ARGS="-gpg-key=${GPG_KEY_ID}"
+        if ! retry_command aptly publish snapshot -gpg-key="${GPG_KEY_ID}" "${APPROVED_SNAPSHOT}" "${DISTRIBUTION}"; then
+            log_error "Failed to publish snapshot ${APPROVED_SNAPSHOT}"
+            exit 1
+        fi
     else
-        GPG_ARGS="-skip-signing"
-    fi
-
-    if ! retry_command "aptly publish snapshot ${GPG_ARGS} ${APPROVED_SNAPSHOT} ${DISTRIBUTION}"; then
-        log_error "Failed to publish snapshot ${APPROVED_SNAPSHOT}"
-        exit 1
+        if ! retry_command aptly publish snapshot -skip-signing "${APPROVED_SNAPSHOT}" "${DISTRIBUTION}"; then
+            log_error "Failed to publish snapshot ${APPROVED_SNAPSHOT}"
+            exit 1
+        fi
     fi
 
     log "Publication created for ${APPROVED_SNAPSHOT}"

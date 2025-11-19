@@ -19,20 +19,10 @@ MAX_SCAN_AGE_HOURS="${MAX_SCAN_AGE_HOURS:-24}"
 APTLY_POOL="${APTLY_POOL:-/var/lib/aptly/pool}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
-# Logging
-TIMESTAMP=$(date +%Y-%m-%dT%H:%M:%S)
-DATE_SUFFIX=$(date +%Y%m%d)
-LOG_FILE="${LOG_DIR}/rescan-${DATE_SUFFIX}.log"
-
-mkdir -p "${LOG_DIR}"
-
-log() {
-    echo "${TIMESTAMP} [INFO] [rescan-packages] $*" | tee -a "${LOG_FILE}"
-}
-
-log_error() {
-    echo "${TIMESTAMP} [ERROR] [rescan-packages] $*" | tee -a "${LOG_FILE}" >&2
-}
+# Set script name for logging and source shared utilities
+SCRIPT_NAME="rescan-packages"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
 
 # Validate snapshot argument
 if [ -z "${CURRENT_SNAPSHOT}" ]; then
