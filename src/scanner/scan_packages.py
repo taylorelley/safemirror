@@ -100,8 +100,8 @@ class PackageScanner:
             else:
                 raise ValueError(f"Unknown scanner type: {self.scanner_type}")
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            self.logger.error(f"Scanner validation failed: {e}")
-            raise RuntimeError(f"Scanner {self.scanner_type} not available")
+            self.logger.exception("Scanner validation failed")
+            raise RuntimeError(f"Scanner {self.scanner_type} not available") from e
 
     def scan_package(self, package_path: str) -> ScanResult:
         """Scan a Debian package for vulnerabilities.
@@ -134,7 +134,7 @@ class PackageScanner:
                     package_name, package_version, vulnerabilities
                 )
             except Exception as e:
-                self.logger.error(f"Scan failed for {package_file.name}: {e}")
+                self.logger.exception(f"Scan failed for {package_file.name}")
                 result = self._error_result(package_name, str(e), package_version)
 
         # Save scan result
@@ -176,9 +176,9 @@ class PackageScanner:
                 timeout=60,
             )
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Failed to extract package: {e.stderr.decode()}")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Package extraction timed out")
+            raise RuntimeError(f"Failed to extract package: {e.stderr.decode()}") from e
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError("Package extraction timed out") from e
 
     def _run_scanner(self, scan_path: str) -> List[Dict[str, Any]]:
         """Run vulnerability scanner on extracted package.
@@ -406,7 +406,7 @@ class PackageScanner:
                 json.dump(result.to_dict(), f, indent=2)
             self.logger.debug(f"Scan result saved to {output_path}")
         except Exception as e:
-            self.logger.error(f"Failed to save scan result: {e}")
+            self.logger.exception("Failed to save scan result")
 
     def update_scanner_db(self) -> bool:
         """Update vulnerability database.
@@ -434,5 +434,5 @@ class PackageScanner:
             self.logger.info("Vulnerability database updated successfully")
             return True
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            self.logger.error(f"Database update failed: {e}")
+            self.logger.exception("Database update failed")
             return False

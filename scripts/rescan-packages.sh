@@ -77,7 +77,6 @@ log "Found ${PACKAGE_COUNT} packages to potentially rescan"
 # Find packages that need rescanning
 # (scans older than MAX_SCAN_AGE_HOURS or no scan exists)
 RESCAN_COUNT=0
-BLOCKED_COUNT=0
 
 # Get current time in seconds
 CURRENT_TIME=$(date +%s)

@@ -65,9 +65,6 @@ temp/
 *.tmp
 
 # APT Mirror specific
-/opt/apt-mirror-system/scans/
-/opt/apt-mirror-system/approvals/
-/opt/apt-mirror-system/logs/
 *.deb
 *.dsc
 *.changes

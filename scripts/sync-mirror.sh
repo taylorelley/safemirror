@@ -82,7 +82,7 @@ log "Snapshot ${SNAPSHOT_NAME} created successfully"
 # Save snapshot metadata
 SNAPSHOT_FILE="${SNAPSHOTS_DIR}/${SNAPSHOT_NAME}.txt"
 
-if aptly snapshot show -with-packages "${SNAPSHOT_NAME}" > "${SNAPSHOT_FILE}"; then
+if retry_command "aptly snapshot show -with-packages '${SNAPSHOT_NAME}' > '${SNAPSHOT_FILE}'"; then
     log "Snapshot metadata saved to ${SNAPSHOT_FILE}"
 else
     log_error "Failed to save snapshot metadata"

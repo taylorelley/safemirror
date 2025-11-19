@@ -38,7 +38,15 @@ def setup_logger(
         Configured logger instance
     """
     logger = logging.getLogger(name)
-    logger.setLevel(getattr(logging, level.upper()))
+
+    # Validate and set log level
+    level_upper = level.upper()
+    if not hasattr(logging, level_upper):
+        raise ValueError(
+            f"Invalid log level: {level}. "
+            f"Must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL"
+        )
+    logger.setLevel(getattr(logging, level_upper))
 
     # Prevent duplicate handlers
     if logger.handlers:

@@ -87,7 +87,8 @@ log "Filtering ${PACKAGE_COUNT} approved packages"
 
 # For large package lists, use include-file directly if supported
 # Otherwise, build a query string (limited by command line length)
-if [ "${PACKAGE_COUNT}" -gt 100 ]; then
+# Using 50 as threshold to safely avoid hitting shell command-line limits
+if [ "${PACKAGE_COUNT}" -gt 50 ]; then
     # Use temporary filter file approach
     TEMP_FILTER=$(mktemp)
 

@@ -51,7 +51,16 @@ if ! aptly snapshot show "${NEW_SNAPSHOT}" > /dev/null 2>&1; then
 fi
 
 # Get package diff
-DIFF_OUTPUT=$(aptly snapshot diff "${OLD_SNAPSHOT}" "${NEW_SNAPSHOT}" 2>&1 || true)
+DIFF_OUTPUT=$(aptly snapshot diff "${OLD_SNAPSHOT}" "${NEW_SNAPSHOT}" 2>&1)
+DIFF_EXIT=$?
+
+# Check for real errors (exit code > 1 typically indicates infrastructure failure)
+# aptly returns 0 for success, may return 1 for differences found
+if [ ${DIFF_EXIT} -gt 1 ]; then
+    log_error "aptly snapshot diff failed with exit code ${DIFF_EXIT}"
+    log_error "Output: ${DIFF_OUTPUT}"
+    exit 1
+fi
 
 # Parse diff output
 # aptly snapshot diff format:

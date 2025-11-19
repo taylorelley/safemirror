@@ -27,8 +27,8 @@ def main():
             "system": {"scans_dir": "/opt/apt-mirror-system/scans"},
         }
 
-    # Setup logging
-    logger = setup_logger(
+    # Setup logging infrastructure (configures logger used by scanner module)
+    setup_logger(
         "scanner",
         log_dir=config.get("system", {}).get("logs_dir", "/opt/apt-mirror-system/logs"),
         level=config.get("logging", {}).get("level", "INFO"),
