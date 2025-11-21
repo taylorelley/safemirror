@@ -207,6 +207,21 @@ class TestScriptAnalyzer:
         high_issues = [i for i in issues if i.severity == "high"]
         assert len(high_issues) > 0
 
+    def test_extraction_failure_raises_exception(self):
+        """Test that script extraction failures raise exceptions (default-deny)."""
+        from src.scanner.script_analyzer import ScriptAnalyzer
+        import subprocess
+
+        analyzer = ScriptAnalyzer()
+
+        # Mock subprocess to simulate dpkg-deb failure
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(1, 'dpkg-deb', stderr=b'corrupt package')
+
+            # Should raise RuntimeError, not return empty dict
+            with pytest.raises(RuntimeError, match="extraction failed"):
+                analyzer._extract_maintainer_scripts("/fake/package.deb")
+
 
 class TestBinaryChecker:
     """Test cases for binary safety checker."""
@@ -269,6 +284,44 @@ class TestBinaryChecker:
         critical_issues = [i for i in issues if i.severity == "critical"]
         assert len(critical_issues) > 0
         assert any("device" in i.issue_type.lower() for i in critical_issues)
+
+    def test_file_listing_failure_raises_exception(self):
+        """Test that file listing failures raise exceptions (default-deny)."""
+        from src.scanner.binary_checker import BinaryChecker
+        import subprocess
+
+        checker = BinaryChecker()
+
+        # Mock subprocess to simulate dpkg-deb failure
+        with patch('subprocess.run') as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(1, 'dpkg-deb', stderr=b'corrupt package')
+
+            # Should raise RuntimeError, not return empty list
+            with pytest.raises(RuntimeError, match="listing failed"):
+                checker._get_file_list("/fake/package.deb")
+
+    def test_empty_package_is_unsafe(self):
+        """Test that packages with no files are treated as unsafe."""
+        from src.scanner.binary_checker import BinaryChecker
+
+        checker = BinaryChecker()
+
+        # Create a test file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.deb') as f:
+            test_file = f.name
+
+        try:
+            # Mock _get_file_list to return empty list (simulating empty package)
+            with patch.object(checker, '_get_file_list', return_value=[]):
+                result = checker.analyze_package(test_file)
+
+                # Empty package should be unsafe
+                assert result.safe is False
+                assert len(result.issues_found) > 0
+                assert any("empty" in i.issue_type.lower() for i in result.issues_found)
+
+        finally:
+            Path(test_file).unlink()
 
 
 class TestIntegrityChecker:

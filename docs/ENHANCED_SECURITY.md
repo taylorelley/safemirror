@@ -288,7 +288,18 @@ A package scan returns **ERROR** status if:
 - Package file not found or unreadable
 - Scan infrastructure failure
 
-**Default-Deny**: Errors are treated as BLOCKED to ensure unscanned packages never reach production.
+**Default-Deny Enforcement**:
+
+All scanner errors are treated as BLOCKED to ensure unscanned packages never reach production. This includes:
+
+- **Script extraction failures**: If dpkg-deb fails to extract maintainer scripts, the package is BLOCKED (not treated as "no scripts")
+- **File listing failures**: If dpkg-deb fails to list package contents, the package is BLOCKED (not treated as "no files")
+- **Empty packages**: Packages with no files are treated as HIGH severity issues and BLOCKED
+- **Virus scanner unavailable**: If ClamAV is not responding, scans fail and packages are BLOCKED
+- **Integrity check failures**: Any package format validation failure BLOCKS the package
+- **Timeout conditions**: All timeouts (extraction, scanning, verification) result in BLOCKED status
+
+This strict error handling prevents "fail-open" scenarios where scanner errors could inadvertently approve malicious packages.
 
 ---
 
