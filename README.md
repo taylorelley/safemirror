@@ -13,14 +13,22 @@ Packages are automatically scanned for vulnerabilities using Trivy or Grype, and
 
 ## Features
 
-- **Automated vulnerability scanning** using industry-standard tools (Trivy/Grype)
-- **Policy-based filtering** with configurable CVSS thresholds and severity levels
+### Core Security Features
+
+- **Multi-layer security scanning** with comprehensive threat detection
+  - **Vulnerability scanning** (CVE detection) using Trivy/Grype
+  - **Virus/malware scanning** using ClamAV antivirus
+  - **Package integrity verification** (format, structure, checksums)
+  - **Maintainer script analysis** (dangerous command detection)
+  - **Binary safety checks** (SUID/SGID, suspicious permissions)
+
+- **Policy-based filtering** with configurable security thresholds
 - **CVE drift detection** through nightly rescanning
-- **Comprehensive audit logging** of all sync, scan, and publish operations
-- **GPG-signed repositories** for package integrity
-- **HTTPS-only distribution** for secure package delivery
-- **Retry logic** with exponential backoff for network failures
-- **Default-deny security model** - failed scans block packages
+- **Comprehensive audit logging** of all operations
+- **GPG-signed repositories** for package authenticity
+- **HTTPS-only distribution** for secure delivery
+- **Default-deny security model** - failed scans automatically block packages
+- **Parallel scanning** for performance optimization
 
 ## Architecture
 
@@ -51,10 +59,12 @@ Upstream Repositories (Ubuntu, Debian)
 ### Required Software
 
 - **aptly** - Debian repository management tool
-- **Trivy** OR **Grype** - Vulnerability scanner
+- **Trivy** OR **Grype** - Vulnerability scanner (CVE detection)
+- **ClamAV** - Antivirus scanner (virus/malware detection)
 - **nginx** OR **Apache** - Web server for HTTPS
 - **Python 3.8+** - For scanner and publisher components
 - **GPG** - For repository signing
+- **binutils** - For binary analysis (readelf)
 
 ## Quick Start
 
@@ -63,12 +73,15 @@ Upstream Repositories (Ubuntu, Debian)
 ```bash
 # Ubuntu/Debian base packages
 sudo apt-get update
-sudo apt-get install -y aptly gnupg nginx python3 python3-pip
+sudo apt-get install -y aptly gnupg nginx python3 python3-pip binutils dpkg-dev
 
-# Install Trivy (recommended)
+# Install ClamAV antivirus (required for virus scanning)
+sudo apt-get install -y clamav clamav-daemon clamav-freshclam
+
+# Install Trivy (recommended vulnerability scanner)
 curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
 
-# OR install Grype
+# OR install Grype (alternative vulnerability scanner)
 curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sudo sh -s -- -b /usr/local/bin
 ```
 
@@ -172,6 +185,31 @@ scanner:
   timeout: 300  # seconds
   workers: 4  # parallel scanning
   update_interval: 24  # hours
+
+  # Enhanced multi-layer security scanning
+  enhanced_scanning:
+    enabled: true
+
+    # Virus/malware scanning with ClamAV
+    virus_scanning:
+      enabled: true
+      update_on_start: true
+
+    # Package integrity verification
+    integrity_checking:
+      enabled: true
+
+    # Maintainer script security analysis
+    script_analysis:
+      enabled: true
+      block_on_critical: true
+      block_on_high: true
+
+    # Binary safety checks (SUID/SGID, permissions)
+    binary_checking:
+      enabled: true
+      block_suspicious_suid: true
+      block_world_writable: true
 ```
 
 ### Security Policy
@@ -358,9 +396,25 @@ safe-apt/
 
 ## Security Considerations
 
+### Enhanced Multi-Layer Security
+
+safe-apt provides comprehensive security through five independent scanning layers:
+
+1. **Vulnerability Scanning (CVE)**: Detects known security vulnerabilities using Trivy/Grype
+2. **Virus/Malware Scanning**: ClamAV antivirus scans all package contents
+3. **Integrity Verification**: Validates package format, structure, and checksums
+4. **Script Analysis**: Analyzes maintainer scripts for dangerous commands and patterns
+5. **Binary Safety**: Detects suspicious SUID/SGID binaries and file permissions
+
+See `docs/ENHANCED_SECURITY.md` for detailed information about each security layer.
+
 ### Default-Deny Policy
 
-If scanning fails for any reason, the package is **blocked by default**. This ensures unscanned packages never reach clients.
+If **any** security scan fails, the package is **blocked by default**. This ensures:
+- No unscanned packages reach clients
+- No packages with detected threats are published
+- Failed scans are treated as security risks
+- System errs on the side of caution
 
 ### HTTPS-Only
 

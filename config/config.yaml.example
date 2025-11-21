@@ -38,7 +38,7 @@ mirrors:
 
 # Scanning configuration
 scanner:
-  # Scanner to use: trivy or grype
+  # Vulnerability scanner to use: trivy or grype
   type: trivy
   # Timeout for scanning a single package (seconds)
   timeout: 300
@@ -50,6 +50,56 @@ scanner:
   max_db_age: 48
   # Scan output format
   output_format: json
+
+  # Enhanced security scanning features
+  enhanced_scanning:
+    # Enable enhanced multi-layer security scanning
+    enabled: true
+
+    # Virus/malware scanning (ClamAV)
+    virus_scanning:
+      enabled: true
+      # Update virus definitions before scanning
+      update_on_start: true
+      # Virus scan timeout (seconds)
+      timeout: 300
+
+    # Package integrity verification
+    integrity_checking:
+      enabled: true
+      # Verify package format and structure
+      check_format: true
+      # Verify control files
+      check_control: true
+      # Verify internal consistency
+      check_consistency: true
+
+    # Maintainer script security analysis
+    script_analysis:
+      enabled: true
+      # Block packages with critical script issues
+      block_on_critical: true
+      # Block packages with high-severity script issues
+      block_on_high: true
+      # Analyze these script types
+      analyze_scripts:
+        - preinst
+        - postinst
+        - prerm
+        - postrm
+        - config
+
+    # Binary safety checks
+    binary_checking:
+      enabled: true
+      # Block suspicious SUID binaries
+      block_suspicious_suid: true
+      # Block world-writable files
+      block_world_writable: true
+      # Block device files in packages
+      block_device_files: true
+      # Warn on legitimate but unusual SUID binaries
+      warn_on_suid: true
 
 # Security policy
 policy:
