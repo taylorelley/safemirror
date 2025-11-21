@@ -230,15 +230,15 @@ class BinaryChecker:
             return file_list
 
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Failed to get file list: {e}")
+            self.logger.exception("Failed to get file list")
             # Re-raise to enforce default-deny: listing failure = unsafe
             raise RuntimeError(f"File listing failed: {e.stderr.decode() if e.stderr else str(e)}") from e
         except subprocess.TimeoutExpired as e:
-            self.logger.error("File list retrieval timed out")
+            self.logger.exception("File list retrieval timed out")
             # Re-raise to enforce default-deny: timeout = unsafe
             raise RuntimeError("File listing timed out") from e
         except Exception as e:
-            self.logger.exception(f"Error getting file list: {e}")
+            self.logger.exception("Error getting file list")
             # Re-raise to enforce default-deny: any failure = unsafe
             raise RuntimeError(f"File listing error: {str(e)}") from e
 
@@ -291,7 +291,7 @@ class BinaryChecker:
                             severity="high",
                             issue_type="unusual_suid",
                             file_path=file_path,
-                            description=f"SUID binary in unusual location",
+                            description="SUID binary in unusual location",
                             permissions=permissions,
                         )
                     )

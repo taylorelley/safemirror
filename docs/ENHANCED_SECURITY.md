@@ -493,7 +493,9 @@ Average scan times per package (on modern hardware):
 - Script analysis: <1 second
 - Binary check: <1 second
 
-**Total: 4-10 seconds per package**
+#### Total Scan Time
+
+4-10 seconds per package
 
 ### Resource Usage
 

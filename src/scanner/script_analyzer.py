@@ -225,15 +225,15 @@ class ScriptAnalyzer:
                             scripts[script_name] = f.read()
 
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Failed to extract maintainer scripts: {e}")
+            self.logger.exception("Failed to extract maintainer scripts")
             # Re-raise to enforce default-deny: extraction failure = unsafe
             raise RuntimeError(f"Maintainer script extraction failed: {e.stderr.decode() if e.stderr else str(e)}") from e
         except subprocess.TimeoutExpired as e:
-            self.logger.error("Script extraction timed out")
+            self.logger.exception("Script extraction timed out")
             # Re-raise to enforce default-deny: timeout = unsafe
             raise RuntimeError("Maintainer script extraction timed out") from e
         except Exception as e:
-            self.logger.exception(f"Error extracting scripts: {e}")
+            self.logger.exception("Error extracting scripts")
             # Re-raise to enforce default-deny: any failure = unsafe
             raise RuntimeError(f"Maintainer script extraction error: {str(e)}") from e
 
