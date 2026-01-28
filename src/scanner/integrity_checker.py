@@ -1,7 +1,8 @@
-"""Package integrity verification for Debian packages.
+"""Package integrity verification for packages.
 
 This module verifies package integrity through signature validation,
 checksum verification, and package format validation.
+Supports multiple package formats through the formats abstraction layer.
 """
 
 import hashlib
@@ -9,9 +10,12 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 from ..common.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..formats.base import PackageFormat
 
 
 @dataclass
@@ -31,19 +35,30 @@ class IntegrityCheckResult:
 
 
 class IntegrityChecker:
-    """Package integrity verification for .deb files."""
+    """Package integrity verification for multiple formats.
 
-    def __init__(self):
-        """Initialize integrity checker."""
+    Supports automatic format detection and format-specific validation
+    through the formats abstraction layer.
+    """
+
+    def __init__(self, format_handler: Optional["PackageFormat"] = None):
+        """Initialize integrity checker.
+
+        Args:
+            format_handler: Optional format handler for package validation
+        """
         self.logger = get_logger("integrity_checker")
+        self.format_handler = format_handler
 
     def check_package(
         self, package_path: str, expected_checksum: Optional[str] = None
     ) -> IntegrityCheckResult:
         """Perform comprehensive integrity checks on a package.
 
+        Supports multiple package formats through format handlers.
+
         Args:
-            package_path: Path to .deb package file
+            package_path: Path to package file
             expected_checksum: Optional expected SHA256 checksum
 
         Returns:
@@ -65,26 +80,49 @@ class IntegrityChecker:
 
         self.logger.info(f"Checking integrity of package: {package_file.name}")
 
+        # Get or detect format handler
+        handler = self._get_format_handler(package_file)
+
         checks_passed = []
         checks_failed = []
         warnings = []
 
         # Check 1: Package format validation
-        format_valid = self._check_package_format(package_path)
+        if handler:
+            # Use format handler for validation
+            try:
+                format_valid = handler.validate_integrity(package_file)
+            except Exception as e:
+                self.logger.warning(f"Format validation failed: {e}")
+                format_valid = False
+        else:
+            # Fall back to .deb validation
+            format_valid = self._check_package_format(package_path)
+
         if format_valid:
             checks_passed.append("package_format")
         else:
             checks_failed.append("package_format")
 
-        # Check 2: Control file validation
-        control_valid = self._check_control_file(package_path)
+        # Check 2: Control/metadata file validation
+        if handler:
+            # Try to parse metadata as validation
+            try:
+                handler.parse_metadata(package_file)
+                control_valid = True
+            except Exception as e:
+                self.logger.warning(f"Metadata validation failed: {e}")
+                control_valid = False
+        else:
+            control_valid = self._check_control_file(package_path)
+
         if control_valid:
             checks_passed.append("control_file")
         else:
             checks_failed.append("control_file")
-            warnings.append("Control file validation failed - package may be corrupted")
+            warnings.append("Control/metadata file validation failed - package may be corrupted")
 
-        # Check 3: Checksum verification
+        # Check 3: Checksum verification (universal)
         checksum_valid = None
         if expected_checksum:
             checksum_valid = self._verify_checksum(package_path, expected_checksum)
@@ -95,14 +133,30 @@ class IntegrityChecker:
                 warnings.append("Checksum mismatch - package may be tampered")
 
         # Check 4: Internal consistency
-        consistency_valid = self._check_internal_consistency(package_path)
+        if handler:
+            # Try to list files as consistency check
+            try:
+                file_list = handler.get_file_list(package_file)
+                consistency_valid = len(file_list) > 0 or self._allow_empty_package(handler)
+                # Check for suspicious paths
+                for f in file_list:
+                    if "/../" in f.path or "//" in f.path:
+                        consistency_valid = False
+                        warnings.append(f"Suspicious path pattern in: {f.path}")
+                        break
+            except Exception as e:
+                self.logger.warning(f"File list retrieval failed: {e}")
+                consistency_valid = False
+        else:
+            consistency_valid = self._check_internal_consistency(package_path)
+
         if consistency_valid:
             checks_passed.append("internal_consistency")
         else:
             checks_failed.append("internal_consistency")
             warnings.append("Package internal structure inconsistent")
 
-        # Check 5: File integrity
+        # Check 5: File integrity (universal - check file is readable)
         file_integrity_valid = self._check_file_integrity(package_path)
         if file_integrity_valid:
             checks_passed.append("file_integrity")
@@ -129,6 +183,37 @@ class IntegrityChecker:
             checksum_valid=checksum_valid,
             control_file_valid=control_valid,
         )
+
+    def _get_format_handler(self, package_file: Path) -> Optional["PackageFormat"]:
+        """Get format handler for package.
+
+        Args:
+            package_file: Path to package file
+
+        Returns:
+            PackageFormat handler or None
+        """
+        if self.format_handler:
+            return self.format_handler
+
+        # Try to auto-detect format
+        try:
+            from ..formats.registry import detect_format
+            return detect_format(package_file)
+        except ImportError:
+            return None
+
+    def _allow_empty_package(self, handler: "PackageFormat") -> bool:
+        """Check if format allows empty packages.
+
+        Args:
+            handler: Format handler
+
+        Returns:
+            True if empty packages are valid for this format
+        """
+        # Some formats (like meta-packages) can be empty
+        return handler.format_name in ("deb",)  # .deb meta-packages can be empty
 
     def _check_package_format(self, package_path: str) -> bool:
         """Verify package has valid .deb format.

@@ -1,0 +1,130 @@
+# SafeMirror Multi-Format Configuration
+# This configuration enables security scanning for multiple package formats
+
+# Global settings
+data_dir: /opt/safemirror/data
+log_dir: /var/log/safemirror
+scan_results_dir: /opt/safemirror/scans
+approvals_dir: /opt/safemirror/approvals
+
+# Scanner configuration
+scanner:
+  virus_scan_enabled: true
+  integrity_check_enabled: true
+  script_analysis_enabled: true
+  binary_check_enabled: true
+  severity_threshold: high  # critical, high, medium, low
+  max_parallel_scans: 4
+  scan_timeout: 300  # seconds
+
+# Format-specific configuration
+formats:
+  # Debian/Ubuntu packages
+  deb:
+    enabled: true
+    repo_manager: aptly
+    vulnerability_scanner: trivy
+    fallback_scanner: grype
+    mirrors:
+      - name: ubuntu-jammy
+        upstream_url: http://archive.ubuntu.com/ubuntu
+        distributions:
+          - jammy
+          - jammy-security
+          - jammy-updates
+        components:
+          - main
+          - universe
+        architectures:
+          - amd64
+          - i386
+        gpg_key_url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x871920D1991BC93C
+
+      - name: debian-bookworm
+        upstream_url: http://deb.debian.org/debian
+        distributions:
+          - bookworm
+          - bookworm-updates
+        components:
+          - main
+          - contrib
+        architectures:
+          - amd64
+
+  # RPM packages (RHEL, Rocky, Fedora)
+  rpm:
+    enabled: true
+    repo_manager: createrepo
+    vulnerability_scanner: trivy
+    fallback_scanner: grype
+    mirrors:
+      - name: rocky-9
+        upstream_url: https://download.rockylinux.org/pub/rocky/9
+        distributions:
+          - BaseOS
+          - AppStream
+        architectures:
+          - x86_64
+        extra_options:
+          gpgcheck: true
+
+      - name: fedora-39
+        upstream_url: https://download.fedoraproject.org/pub/fedora/linux/releases/39
+        distributions:
+          - Everything
+        architectures:
+          - x86_64
+
+  # Alpine APK packages
+  apk:
+    enabled: true
+    repo_manager: apk_mirror
+    vulnerability_scanner: trivy
+    fallback_scanner: grype
+    mirrors:
+      - name: alpine-3.19
+        upstream_url: https://dl-cdn.alpinelinux.org/alpine/v3.19
+        distributions:
+          - main
+          - community
+        architectures:
+          - x86_64
+          - aarch64
+
+  # Python packages (PyPI)
+  wheel:
+    enabled: true
+    repo_manager: bandersnatch
+    vulnerability_scanner: pip-audit
+    fallback_scanner: trivy
+    mirrors:
+      - name: pypi
+        upstream_url: https://pypi.org/simple
+        extra_options:
+          # Packages to mirror (leave empty for all)
+          packages: []
+          # Or specify a requirements file
+          requirements_file: ""
+
+  # Python source distributions
+  sdist:
+    enabled: true
+    repo_manager: bandersnatch
+    vulnerability_scanner: pip-audit
+    fallback_scanner: trivy
+    # Uses same mirror config as wheel
+
+  # NPM packages
+  npm:
+    enabled: true
+    repo_manager: verdaccio
+    vulnerability_scanner: npm-audit
+    fallback_scanner: trivy
+    mirrors:
+      - name: npmjs
+        upstream_url: https://registry.npmjs.org
+        extra_options:
+          # Packages to mirror (leave empty for all requested)
+          packages: []
+          # Scopes to mirror
+          scopes: []

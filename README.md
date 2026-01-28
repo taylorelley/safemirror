@@ -478,19 +478,47 @@ Contributions are welcome! Please:
 
 ## Testing
 
+[![Tests](https://github.com/taylorelley/safemirror/actions/workflows/test.yml/badge.svg)](https://github.com/taylorelley/safemirror/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/taylorelley/safemirror/branch/main/graph/badge.svg)](https://codecov.io/gh/taylorelley/safemirror)
+
+SafeMirror has a comprehensive test suite with 510+ tests covering security scanning, format handling, and pipeline integration.
+
 ```bash
 # Install test dependencies
 pip3 install -r requirements.txt
 
-# Run unit tests
-pytest tests/unit/
+# Run all tests
+pytest tests/ -v
 
-# Run integration tests (requires aptly)
-pytest tests/integration/
+# Run with coverage report
+pytest tests/ --cov=src --cov-report=term-missing
 
-# Run full test suite
-pytest
+# Generate HTML coverage report
+pytest tests/ --cov=src --cov-report=html
+# Open htmlcov/index.html in browser
+
+# Run only unit tests
+pytest tests/unit/ -v
+
+# Run only integration tests
+pytest tests/integration/ -v
+
+# Run security-focused tests
+pytest tests/unit/scanner/test_script_patterns.py -v
+pytest tests/unit/formats/test_malicious_paths.py -v
+
+# Run specific test file
+pytest tests/unit/scanner/test_virus_scanner.py -v
 ```
+
+### Test Categories
+
+- **Unit tests** (`tests/unit/`): Individual component testing
+- **Integration tests** (`tests/integration/`): Multi-component pipeline testing
+- **Format tests** (`tests/unit/formats/`): Package extraction and validation
+- **Security tests**: Malicious pattern detection across scanner modules
+
+See `docs/TESTING.md` for the complete testing guide.
 
 ## Performance
 

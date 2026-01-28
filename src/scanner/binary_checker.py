@@ -1,7 +1,8 @@
-"""Binary safety checker for Debian packages.
+"""Binary safety checker for packages.
 
 This module analyzes binary files in packages for security risks including
 SUID/SGID bits, suspicious file permissions, and potentially dangerous binaries.
+Supports multiple package formats through the formats abstraction layer.
 """
 
 import os
@@ -10,9 +11,12 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional, Set
+from typing import Any, ClassVar, Dict, List, Optional, Set, TYPE_CHECKING
 
 from ..common.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..formats.base import PackageFormat, FileInfo
 
 
 @dataclass
@@ -42,7 +46,10 @@ class BinarySafetyResult:
 
 
 class BinaryChecker:
-    """Safety checker for binary files in Debian packages."""
+    """Safety checker for binary files in packages.
+
+    Supports multiple package formats through format handlers.
+    """
 
     # Binaries that should never have SUID/SGID
     SUSPICIOUS_SUID_BINARIES: ClassVar[Set[str]] = {
@@ -76,15 +83,22 @@ class BinaryChecker:
         "/bin/umount",
     }
 
-    def __init__(self):
-        """Initialize binary checker."""
+    def __init__(self, format_handler: Optional["PackageFormat"] = None):
+        """Initialize binary checker.
+
+        Args:
+            format_handler: Optional format handler for file listing
+        """
         self.logger = get_logger("binary_checker")
+        self.format_handler = format_handler
 
     def analyze_package(self, package_path: str) -> BinarySafetyResult:
         """Analyze binary files in a package for security issues.
 
+        Supports multiple package formats through format handlers.
+
         Args:
-            package_path: Path to .deb package file
+            package_path: Path to package file
 
         Returns:
             BinarySafetyResult with analysis results
@@ -108,12 +122,30 @@ class BinaryChecker:
         self.logger.info(f"Analyzing binary safety in: {package_file.name}")
 
         try:
+            # Get format handler
+            handler = self._get_format_handler(package_file)
+
             # Get file list with permissions
-            file_list = self._get_file_list(package_path)
+            if handler:
+                file_list = self._get_file_list_with_handler(package_file, handler)
+            else:
+                file_list = self._get_file_list(package_path)
 
             if not file_list:
-                # Empty package is suspicious - dpkg-deb succeeded but returned no files
-                # This could indicate a malformed or empty package (both are unsafe)
+                # Check if format allows empty packages
+                if handler and self._allows_empty_package(handler):
+                    self.logger.info(f"Package {package_file.name} is empty (allowed for {handler.format_name})")
+                    return BinarySafetyResult(
+                        safe=True,
+                        files_analyzed=0,
+                        issues_found=[],
+                        warnings=[],
+                        suid_binaries=[],
+                        sgid_binaries=[],
+                        world_writable_files=[],
+                        analysis_date=datetime.now().isoformat(),
+                    )
+                # Empty package is suspicious
                 self.logger.warning(f"Package {package_file.name} contains no files - suspicious")
                 return BinarySafetyResult(
                     safe=False,
@@ -191,8 +223,69 @@ class BinaryChecker:
                 error_message=str(e),
             )
 
+    def _get_format_handler(self, package_file: Path) -> Optional["PackageFormat"]:
+        """Get format handler for package.
+
+        Args:
+            package_file: Path to package file
+
+        Returns:
+            PackageFormat handler or None
+        """
+        if self.format_handler:
+            return self.format_handler
+
+        # Try to auto-detect format
+        try:
+            from ..formats.registry import detect_format
+            return detect_format(package_file)
+        except ImportError:
+            return None
+
+    def _allows_empty_package(self, handler: "PackageFormat") -> bool:
+        """Check if format allows empty packages.
+
+        Args:
+            handler: Format handler
+
+        Returns:
+            True if format allows empty packages
+        """
+        # Pure Python wheels may have no "files" in traditional sense
+        return handler.format_name in ("wheel",)
+
+    def _get_file_list_with_handler(
+        self, package_file: Path, handler: "PackageFormat"
+    ) -> List[Dict[str, str]]:
+        """Get file list using format handler.
+
+        Args:
+            package_file: Path to package file
+            handler: Format handler
+
+        Returns:
+            List of file info dictionaries
+        """
+        file_list = []
+
+        try:
+            file_infos = handler.get_file_list(package_file)
+            for fi in file_infos:
+                file_list.append({
+                    "permissions": fi.permissions,
+                    "path": fi.path,
+                    "raw": f"{fi.permissions} {fi.path}",
+                })
+        except Exception as e:
+            self.logger.warning(f"Handler file listing failed: {e}")
+            # Fall back to legacy method for .deb
+            if handler.format_name == "deb":
+                return self._get_file_list(str(package_file))
+
+        return file_list
+
     def _get_file_list(self, package_path: str) -> List[Dict[str, str]]:
-        """Get list of files in package with permissions.
+        """Get list of files in .deb package with permissions.
 
         Args:
             package_path: Path to .deb package

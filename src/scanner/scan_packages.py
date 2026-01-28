@@ -1,6 +1,7 @@
 """Package scanner worker for safe-apt.
 
-Extracts .deb packages and runs vulnerability scans using Trivy or Grype.
+Extracts packages and runs vulnerability scans using Trivy or Grype.
+Supports multiple package formats through the formats abstraction layer.
 Implements retry logic and stores scan results as JSON.
 """
 
@@ -13,9 +14,12 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 from ..common.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..formats.base import PackageFormat, ExtractedContent
 
 
 class ScanStatus(Enum):
@@ -48,7 +52,12 @@ class ScanResult:
 
 
 class PackageScanner:
-    """Scanner for Debian packages using Trivy or Grype."""
+    """Scanner for packages using Trivy or Grype.
+
+    Supports multiple package formats through the formats abstraction layer.
+    When a format_handler is provided, it uses the handler for extraction
+    and metadata parsing. Otherwise, falls back to dpkg-deb for .deb files.
+    """
 
     def __init__(
         self,
@@ -57,21 +66,24 @@ class PackageScanner:
         scans_dir: str = "/opt/apt-mirror-system/scans",
         min_cvss_score: float = 7.0,
         block_severities: Optional[List[str]] = None,
+        format_handler: Optional["PackageFormat"] = None,
     ):
         """Initialize package scanner.
 
         Args:
-            scanner_type: Scanner to use (trivy or grype)
+            scanner_type: Scanner to use (trivy, grype, pip-audit, npm-audit)
             timeout: Scan timeout in seconds
             scans_dir: Directory to store scan results
             min_cvss_score: Minimum CVSS score to block packages
             block_severities: List of severities to block
+            format_handler: Optional format handler for package extraction
         """
         self.scanner_type = scanner_type.lower()
         self.timeout = timeout
         self.scans_dir = Path(scans_dir)
         self.min_cvss_score = min_cvss_score
         self.block_severities = block_severities or ["CRITICAL", "HIGH"]
+        self.format_handler = format_handler
         self.logger = get_logger("scanner")
 
         # Ensure scans directory exists
@@ -97,6 +109,21 @@ class PackageScanner:
                     check=True,
                     timeout=10,
                 )
+            elif self.scanner_type == "pip-audit":
+                subprocess.run(
+                    ["pip-audit", "--version"],
+                    capture_output=True,
+                    check=True,
+                    timeout=10,
+                )
+            elif self.scanner_type == "npm-audit":
+                # npm audit doesn't have a standalone version command
+                subprocess.run(
+                    ["npm", "--version"],
+                    capture_output=True,
+                    check=True,
+                    timeout=10,
+                )
             else:
                 raise ValueError(f"Unknown scanner type: {self.scanner_type}")
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -104,10 +131,13 @@ class PackageScanner:
             raise RuntimeError(f"Scanner {self.scanner_type} not available") from e
 
     def scan_package(self, package_path: str) -> ScanResult:
-        """Scan a Debian package for vulnerabilities.
+        """Scan a package for vulnerabilities.
+
+        Supports multiple package formats through the format handler.
+        If no format handler is set, auto-detects or falls back to .deb.
 
         Args:
-            package_path: Path to .deb package file
+            package_path: Path to package file
 
         Returns:
             ScanResult with vulnerability information
@@ -122,25 +152,69 @@ class PackageScanner:
 
         self.logger.info(f"Scanning package: {package_file.name}")
 
-        # Extract package name and version
-        package_name, package_version = self._parse_package_name(package_file.name)
+        # Get or detect format handler
+        handler = self._get_format_handler(package_file)
 
-        # Extract package to temporary directory
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # Extract package name and version
+        if handler:
             try:
-                self._extract_package(package_path, temp_dir)
-                vulnerabilities = self._run_scanner(temp_dir)
-                result = self._analyze_results(
-                    package_name, package_version, vulnerabilities
-                )
+                metadata = handler.parse_metadata(package_file)
+                package_name = metadata.name
+                package_version = metadata.version
             except Exception as e:
-                self.logger.exception(f"Scan failed for {package_file.name}")
-                result = self._error_result(package_name, str(e), package_version)
+                self.logger.warning(f"Metadata parsing failed, using filename: {e}")
+                package_name, package_version = self._parse_package_name(package_file.name)
+        else:
+            package_name, package_version = self._parse_package_name(package_file.name)
+
+        # Extract and scan package
+        try:
+            if handler:
+                # Use format handler for extraction
+                extracted = handler.extract(package_file)
+                try:
+                    scan_path = str(extracted.data_path or extracted.extract_path)
+                    vulnerabilities = self._run_scanner(scan_path)
+                    result = self._analyze_results(
+                        package_name, package_version, vulnerabilities
+                    )
+                finally:
+                    extracted.cleanup()
+            else:
+                # Fall back to legacy .deb extraction
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    self._extract_package(package_path, temp_dir)
+                    vulnerabilities = self._run_scanner(temp_dir)
+                    result = self._analyze_results(
+                        package_name, package_version, vulnerabilities
+                    )
+        except Exception as e:
+            self.logger.exception(f"Scan failed for {package_file.name}")
+            result = self._error_result(package_name, str(e), package_version)
 
         # Save scan result
         self._save_result(result)
 
         return result
+
+    def _get_format_handler(self, package_file: Path) -> Optional["PackageFormat"]:
+        """Get format handler for package.
+
+        Args:
+            package_file: Path to package file
+
+        Returns:
+            PackageFormat handler or None
+        """
+        if self.format_handler:
+            return self.format_handler
+
+        # Try to auto-detect format
+        try:
+            from ..formats.registry import detect_format
+            return detect_format(package_file)
+        except ImportError:
+            return None
 
     def _parse_package_name(self, filename: str) -> tuple[str, str]:
         """Parse package name and version from .deb filename.
@@ -196,6 +270,10 @@ class PackageScanner:
                 return self._run_trivy(scan_path)
             elif self.scanner_type == "grype":
                 return self._run_grype(scan_path)
+            elif self.scanner_type == "pip-audit":
+                return self._run_pip_audit(scan_path)
+            elif self.scanner_type == "npm-audit":
+                return self._run_npm_audit(scan_path)
             else:
                 raise ValueError(f"Unknown scanner: {self.scanner_type}")
         except subprocess.TimeoutExpired:
@@ -310,6 +388,157 @@ class PackageScanner:
             return vulnerabilities
         except json.JSONDecodeError as e:
             self.logger.warning(f"Failed to parse Grype output: {e}")
+            return []
+
+    def _run_pip_audit(self, scan_path: str) -> List[Dict[str, Any]]:
+        """Run pip-audit scanner for Python packages.
+
+        Args:
+            scan_path: Path to scan (should contain Python package files)
+
+        Returns:
+            List of vulnerabilities
+        """
+        # Look for requirements.txt or pyproject.toml
+        scan_dir = Path(scan_path)
+        requirements_file = None
+
+        for req_name in ["requirements.txt", "setup.py", "pyproject.toml"]:
+            req_path = scan_dir / req_name
+            if req_path.exists():
+                requirements_file = req_path
+                break
+
+        # If no requirements file, try scanning the directory
+        cmd = ["pip-audit", "--format", "json", "--strict"]
+        if requirements_file and requirements_file.name == "requirements.txt":
+            cmd.extend(["--requirement", str(requirements_file)])
+        else:
+            # Scan installed packages in the path (less accurate for extracted packages)
+            cmd.extend(["--path", scan_path])
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=self.timeout,
+                check=False,
+                cwd=scan_path,
+            )
+        except FileNotFoundError:
+            self.logger.warning("pip-audit not found, falling back to trivy")
+            return self._run_trivy(scan_path)
+
+        output = result.stdout.decode()
+        if not output.strip():
+            return []
+
+        try:
+            data = json.loads(output)
+            vulnerabilities = []
+
+            # pip-audit format: {"dependencies": [{"vulns": [...]}]}
+            for dep in data.get("dependencies", []):
+                pkg_name = dep.get("name", "")
+                pkg_version = dep.get("version", "")
+                for vuln in dep.get("vulns", []):
+                    vulnerabilities.append(
+                        {
+                            "cve_id": vuln.get("id", ""),
+                            "severity": self._pip_audit_severity(vuln),
+                            "cvss_score": 0.0,  # pip-audit doesn't always provide CVSS
+                            "package": pkg_name,
+                            "installed_version": pkg_version,
+                            "fixed_version": ",".join(vuln.get("fix_versions", [])),
+                            "title": vuln.get("id", ""),
+                            "description": vuln.get("description", ""),
+                        }
+                    )
+
+            return vulnerabilities
+        except json.JSONDecodeError as e:
+            self.logger.warning(f"Failed to parse pip-audit output: {e}")
+            return []
+
+    def _pip_audit_severity(self, vuln: Dict[str, Any]) -> str:
+        """Map pip-audit vulnerability to severity.
+
+        Args:
+            vuln: Vulnerability dict from pip-audit
+
+        Returns:
+            Severity string
+        """
+        # pip-audit uses GHSA IDs which we can map to severity
+        vuln_id = vuln.get("id", "")
+        if vuln_id.startswith("GHSA-"):
+            # GitHub Security Advisories - would need API lookup for severity
+            # For now, treat all as HIGH since they're known vulnerabilities
+            return "HIGH"
+        elif vuln_id.startswith("CVE-"):
+            # CVEs - would need NVD lookup for actual CVSS
+            return "HIGH"
+        return "MEDIUM"
+
+    def _run_npm_audit(self, scan_path: str) -> List[Dict[str, Any]]:
+        """Run npm audit scanner for NPM packages.
+
+        Args:
+            scan_path: Path to scan (should contain package.json)
+
+        Returns:
+            List of vulnerabilities
+        """
+        scan_dir = Path(scan_path)
+        package_json = scan_dir / "package.json"
+
+        if not package_json.exists():
+            self.logger.debug("No package.json found, skipping npm audit")
+            return []
+
+        try:
+            result = subprocess.run(
+                ["npm", "audit", "--json"],
+                capture_output=True,
+                timeout=self.timeout,
+                check=False,
+                cwd=scan_path,
+            )
+        except FileNotFoundError:
+            self.logger.warning("npm not found, falling back to trivy")
+            return self._run_trivy(scan_path)
+
+        output = result.stdout.decode()
+        if not output.strip():
+            return []
+
+        try:
+            data = json.loads(output)
+            vulnerabilities = []
+
+            # npm audit format varies by version
+            # v7+: {"vulnerabilities": {"package_name": {...}}}
+            vulns_dict = data.get("vulnerabilities", {})
+            for pkg_name, vuln_info in vulns_dict.items():
+                severity = vuln_info.get("severity", "UNKNOWN").upper()
+                for via in vuln_info.get("via", []):
+                    if isinstance(via, dict):
+                        vulnerabilities.append(
+                            {
+                                "cve_id": via.get("url", "").split("/")[-1] if via.get("url") else "",
+                                "severity": severity,
+                                "cvss_score": via.get("cvss", {}).get("score", 0.0) if isinstance(via.get("cvss"), dict) else 0.0,
+                                "package": pkg_name,
+                                "installed_version": vuln_info.get("range", ""),
+                                "fixed_version": vuln_info.get("fixAvailable", {}).get("version", "") if isinstance(vuln_info.get("fixAvailable"), dict) else "",
+                                "title": via.get("title", ""),
+                                "description": via.get("title", ""),
+                            }
+                        )
+
+            return vulnerabilities
+        except json.JSONDecodeError as e:
+            self.logger.warning(f"Failed to parse npm audit output: {e}")
             return []
 
     def _analyze_results(

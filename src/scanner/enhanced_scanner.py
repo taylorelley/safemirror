@@ -2,13 +2,14 @@
 
 This module combines vulnerability scanning, virus scanning, integrity checking,
 script analysis, and binary safety checks into a comprehensive security scanner.
+Supports multiple package formats through the formats abstraction layer.
 """
 
 import json
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 from ..common.logger import get_logger
 from .scan_packages import PackageScanner, ScanStatus
@@ -16,6 +17,9 @@ from .virus_scanner import VirusScanner
 from .integrity_checker import IntegrityChecker
 from .script_analyzer import ScriptAnalyzer
 from .binary_checker import BinaryChecker
+
+if TYPE_CHECKING:
+    from ..formats.base import PackageFormat, FormatCapabilities
 
 
 @dataclass
@@ -69,7 +73,11 @@ class EnhancedScanResult:
 
 
 class EnhancedSecurityScanner:
-    """Comprehensive security scanner for Debian packages."""
+    """Comprehensive security scanner for packages.
+
+    Supports multiple package formats through the formats abstraction layer.
+    Adapts security checks based on format capabilities.
+    """
 
     def __init__(
         self,
@@ -82,11 +90,12 @@ class EnhancedSecurityScanner:
         enable_integrity_check: bool = True,
         enable_script_analysis: bool = True,
         enable_binary_check: bool = True,
+        format_handler: Optional["PackageFormat"] = None,
     ):
         """Initialize enhanced security scanner.
 
         Args:
-            scanner_type: Vulnerability scanner to use (trivy or grype)
+            scanner_type: Vulnerability scanner to use (trivy, grype, pip-audit, npm-audit)
             timeout: Scan timeout in seconds
             scans_dir: Directory to store scan results
             min_cvss_score: Minimum CVSS score to block packages
@@ -95,10 +104,19 @@ class EnhancedSecurityScanner:
             enable_integrity_check: Enable package integrity verification
             enable_script_analysis: Enable maintainer script analysis
             enable_binary_check: Enable binary safety checks
+            format_handler: Optional format handler for package extraction
         """
         self.logger = get_logger("enhanced_scanner")
         self.scans_dir = Path(scans_dir)
         self.scans_dir.mkdir(parents=True, exist_ok=True)
+        self.format_handler = format_handler
+        self.timeout = timeout
+
+        # Store enable flags (may be overridden by format capabilities)
+        self._enable_virus_scan = enable_virus_scan
+        self._enable_integrity_check = enable_integrity_check
+        self._enable_script_analysis = enable_script_analysis
+        self._enable_binary_check = enable_binary_check
 
         # Initialize component scanners
         self.vuln_scanner = PackageScanner(
@@ -107,6 +125,7 @@ class EnhancedSecurityScanner:
             scans_dir=str(scans_dir),
             min_cvss_score=min_cvss_score,
             block_severities=block_severities,
+            format_handler=format_handler,
         )
 
         self.virus_scanner = None
@@ -135,14 +154,31 @@ class EnhancedSecurityScanner:
     def scan_package(self, package_path: str) -> EnhancedScanResult:
         """Perform comprehensive security scan on a package.
 
+        Adapts security checks based on package format capabilities.
+
         Args:
-            package_path: Path to .deb package file
+            package_path: Path to package file
 
         Returns:
             EnhancedScanResult with all scan results
         """
         package_file = Path(package_path)
-        package_name, package_version = self._parse_package_name(package_file.name)
+
+        # Get format handler and capabilities
+        handler = self._get_format_handler(package_file)
+        capabilities = self._get_capabilities(handler)
+
+        # Parse metadata
+        if handler:
+            try:
+                metadata = handler.parse_metadata(package_file)
+                package_name = metadata.name
+                package_version = metadata.version
+            except Exception as e:
+                self.logger.warning(f"Metadata parsing failed, using filename: {e}")
+                package_name, package_version = self._parse_package_name(package_file.name)
+        else:
+            package_name, package_version = self._parse_package_name(package_file.name)
 
         self.logger.info(f"Starting enhanced security scan: {package_file.name}")
 
@@ -173,11 +209,11 @@ class EnhancedSecurityScanner:
             elif severity == "LOW":
                 low_issues += 1
 
-        # 2. Virus Scanning
+        # 2. Virus Scanning (always applicable)
         virus_scan_status = "skipped"
         viruses_found = []
 
-        if self.virus_scanner:
+        if self.virus_scanner and capabilities.supports_virus_scan:
             self.logger.info("Running virus scan...")
             virus_result = self.virus_scanner.scan_package(package_path)
             virus_scan_status = "clean" if virus_result.clean else "infected"
@@ -191,46 +227,121 @@ class EnhancedSecurityScanner:
         integrity_status = "skipped"
         integrity_issues = []
 
-        if self.integrity_checker:
+        if self.integrity_checker and capabilities.supports_integrity_check:
             self.logger.info("Running integrity checks...")
-            integrity_result = self.integrity_checker.check_package(package_path)
-            integrity_status = "valid" if integrity_result.valid else "invalid"
-            integrity_issues = integrity_result.checks_failed
-            warnings.extend(integrity_result.warnings)
+            # Use format handler for integrity if available
+            if handler:
+                try:
+                    is_valid = handler.validate_integrity(package_file)
+                    integrity_status = "valid" if is_valid else "invalid"
+                    if not is_valid:
+                        integrity_issues = ["format_validation_failed"]
+                        high_issues += 1
+                except Exception as e:
+                    self.logger.warning(f"Format integrity check failed: {e}")
+                    integrity_status = "invalid"
+                    integrity_issues = [str(e)]
+                    high_issues += 1
+            else:
+                # Fall back to legacy integrity checker for .deb
+                integrity_result = self.integrity_checker.check_package(package_path)
+                integrity_status = "valid" if integrity_result.valid else "invalid"
+                integrity_issues = integrity_result.checks_failed
+                warnings.extend(integrity_result.warnings)
 
-            if not integrity_result.valid:
-                high_issues += len(integrity_issues)
+                if not integrity_result.valid:
+                    high_issues += len(integrity_issues)
+        elif not capabilities.supports_integrity_check:
+            self.logger.debug("Integrity check not applicable for this format")
 
         # 4. Script Analysis
         script_analysis_status = "skipped"
         script_issues = []
         scripts_analyzed = []
 
-        if self.script_analyzer:
+        if self.script_analyzer and capabilities.supports_script_analysis:
             self.logger.info("Running script analysis...")
-            script_result = self.script_analyzer.analyze_package(package_path)
-            script_analysis_status = "safe" if script_result.safe else "unsafe"
-            scripts_analyzed = script_result.scripts_analyzed
-            warnings.extend(script_result.warnings)
+            # Use format handler to extract scripts if available
+            if handler and capabilities.has_maintainer_scripts:
+                try:
+                    extracted = handler.extract(package_file)
+                    try:
+                        # Analyze scripts from extracted content
+                        for script_info in extracted.scripts:
+                            scripts_analyzed.append(script_info.name)
+                            issues, warns = self.script_analyzer._analyze_script(
+                                script_info.name, script_info.content
+                            )
+                            for issue in issues:
+                                script_issues.append({
+                                    "severity": issue.severity,
+                                    "type": issue.issue_type,
+                                    "description": issue.description,
+                                    "line_number": issue.line_number,
+                                    "code_snippet": issue.code_snippet,
+                                })
+                                if issue.severity == "critical":
+                                    critical_issues += 1
+                                elif issue.severity == "high":
+                                    high_issues += 1
+                                elif issue.severity == "medium":
+                                    medium_issues += 1
+                                elif issue.severity == "low":
+                                    low_issues += 1
+                            warnings.extend(warns)
+                        script_analysis_status = "safe" if not any(
+                            i["severity"] in ("critical", "high") for i in script_issues
+                        ) else "unsafe"
+                    finally:
+                        extracted.cleanup()
+                except Exception as e:
+                    self.logger.warning(f"Script extraction failed, using legacy: {e}")
+                    script_result = self.script_analyzer.analyze_package(package_path)
+                    script_analysis_status = "safe" if script_result.safe else "unsafe"
+                    scripts_analyzed = script_result.scripts_analyzed
+                    warnings.extend(script_result.warnings)
+                    for issue in script_result.issues_found:
+                        script_issues.append({
+                            "severity": issue.severity,
+                            "type": issue.issue_type,
+                            "description": issue.description,
+                            "line_number": issue.line_number,
+                            "code_snippet": issue.code_snippet,
+                        })
+                        if issue.severity == "critical":
+                            critical_issues += 1
+                        elif issue.severity == "high":
+                            high_issues += 1
+                        elif issue.severity == "medium":
+                            medium_issues += 1
+                        elif issue.severity == "low":
+                            low_issues += 1
+            else:
+                # Fall back to legacy script analyzer for .deb
+                script_result = self.script_analyzer.analyze_package(package_path)
+                script_analysis_status = "safe" if script_result.safe else "unsafe"
+                scripts_analyzed = script_result.scripts_analyzed
+                warnings.extend(script_result.warnings)
 
-            # Convert script issues to dict and count
-            for issue in script_result.issues_found:
-                script_issues.append({
-                    "severity": issue.severity,
-                    "type": issue.issue_type,
-                    "description": issue.description,
-                    "line_number": issue.line_number,
-                    "code_snippet": issue.code_snippet,
-                })
-
-                if issue.severity == "critical":
-                    critical_issues += 1
-                elif issue.severity == "high":
-                    high_issues += 1
-                elif issue.severity == "medium":
-                    medium_issues += 1
-                elif issue.severity == "low":
-                    low_issues += 1
+                for issue in script_result.issues_found:
+                    script_issues.append({
+                        "severity": issue.severity,
+                        "type": issue.issue_type,
+                        "description": issue.description,
+                        "line_number": issue.line_number,
+                        "code_snippet": issue.code_snippet,
+                    })
+                    if issue.severity == "critical":
+                        critical_issues += 1
+                    elif issue.severity == "high":
+                        high_issues += 1
+                    elif issue.severity == "medium":
+                        medium_issues += 1
+                    elif issue.severity == "low":
+                        low_issues += 1
+        elif not capabilities.supports_script_analysis:
+            self.logger.debug("Script analysis not applicable for this format")
+            script_analysis_status = "not_applicable"
 
         # 5. Binary Safety Checks
         binary_safety_status = "skipped"
@@ -238,32 +349,95 @@ class EnhancedSecurityScanner:
         suid_binaries = []
         world_writable_files = []
 
-        if self.binary_checker:
+        if self.binary_checker and capabilities.supports_binary_check:
             self.logger.info("Running binary safety checks...")
-            binary_result = self.binary_checker.analyze_package(package_path)
-            binary_safety_status = "safe" if binary_result.safe else "unsafe"
-            suid_binaries = binary_result.suid_binaries
-            world_writable_files = binary_result.world_writable_files
-            warnings.extend(binary_result.warnings)
+            # Use format handler for file list if available
+            if handler:
+                try:
+                    file_list = handler.get_file_list(package_file)
+                    # Analyze files using binary checker's logic
+                    for file_info in file_list:
+                        file_dict = {
+                            "permissions": file_info.permissions,
+                            "path": file_info.path,
+                            "raw": f"{file_info.permissions} {file_info.path}",
+                        }
+                        issues, warns, flags = self.binary_checker._analyze_file(file_dict)
+                        for issue in issues:
+                            binary_issues.append({
+                                "severity": issue.severity,
+                                "type": issue.issue_type,
+                                "file_path": issue.file_path,
+                                "description": issue.description,
+                                "permissions": issue.permissions,
+                            })
+                            if issue.severity == "critical":
+                                critical_issues += 1
+                            elif issue.severity == "high":
+                                high_issues += 1
+                            elif issue.severity == "medium":
+                                medium_issues += 1
+                            elif issue.severity == "low":
+                                low_issues += 1
+                        warnings.extend(warns)
+                        if "suid" in flags:
+                            suid_binaries.append(file_info.path)
+                        if "world_writable" in flags:
+                            world_writable_files.append(file_info.path)
 
-            # Convert binary issues to dict and count
-            for issue in binary_result.issues_found:
-                binary_issues.append({
-                    "severity": issue.severity,
-                    "type": issue.issue_type,
-                    "file_path": issue.file_path,
-                    "description": issue.description,
-                    "permissions": issue.permissions,
-                })
+                    binary_safety_status = "safe" if not any(
+                        i["severity"] in ("critical", "high") for i in binary_issues
+                    ) else "unsafe"
+                except Exception as e:
+                    self.logger.warning(f"Format file listing failed, using legacy: {e}")
+                    binary_result = self.binary_checker.analyze_package(package_path)
+                    binary_safety_status = "safe" if binary_result.safe else "unsafe"
+                    suid_binaries = binary_result.suid_binaries
+                    world_writable_files = binary_result.world_writable_files
+                    warnings.extend(binary_result.warnings)
+                    for issue in binary_result.issues_found:
+                        binary_issues.append({
+                            "severity": issue.severity,
+                            "type": issue.issue_type,
+                            "file_path": issue.file_path,
+                            "description": issue.description,
+                            "permissions": issue.permissions,
+                        })
+                        if issue.severity == "critical":
+                            critical_issues += 1
+                        elif issue.severity == "high":
+                            high_issues += 1
+                        elif issue.severity == "medium":
+                            medium_issues += 1
+                        elif issue.severity == "low":
+                            low_issues += 1
+            else:
+                # Fall back to legacy binary checker for .deb
+                binary_result = self.binary_checker.analyze_package(package_path)
+                binary_safety_status = "safe" if binary_result.safe else "unsafe"
+                suid_binaries = binary_result.suid_binaries
+                world_writable_files = binary_result.world_writable_files
+                warnings.extend(binary_result.warnings)
 
-                if issue.severity == "critical":
-                    critical_issues += 1
-                elif issue.severity == "high":
-                    high_issues += 1
-                elif issue.severity == "medium":
-                    medium_issues += 1
-                elif issue.severity == "low":
-                    low_issues += 1
+                for issue in binary_result.issues_found:
+                    binary_issues.append({
+                        "severity": issue.severity,
+                        "type": issue.issue_type,
+                        "file_path": issue.file_path,
+                        "description": issue.description,
+                        "permissions": issue.permissions,
+                    })
+                    if issue.severity == "critical":
+                        critical_issues += 1
+                    elif issue.severity == "high":
+                        high_issues += 1
+                    elif issue.severity == "medium":
+                        medium_issues += 1
+                    elif issue.severity == "low":
+                        low_issues += 1
+        elif not capabilities.supports_binary_check:
+            self.logger.debug("Binary check not applicable for this format")
+            binary_safety_status = "not_applicable"
 
         # Determine overall status
         overall_status = self._determine_overall_status(
@@ -384,18 +558,66 @@ class EnhancedSecurityScanner:
         return ScanStatus.APPROVED
 
     def _parse_package_name(self, filename: str) -> tuple[str, str]:
-        """Parse package name and version from .deb filename.
+        """Parse package name and version from filename.
 
         Args:
-            filename: .deb filename
+            filename: Package filename
 
         Returns:
             Tuple of (package_name, version)
         """
+        # Try format handler first
+        if self.format_handler:
+            return self.format_handler.parse_filename(filename)
+
+        # Fall back to .deb format
         parts = filename.replace(".deb", "").split("_")
         if len(parts) >= 2:
             return parts[0], parts[1]
         return filename, "unknown"
+
+    def _get_format_handler(self, package_file: Path) -> Optional["PackageFormat"]:
+        """Get format handler for package.
+
+        Args:
+            package_file: Path to package file
+
+        Returns:
+            PackageFormat handler or None
+        """
+        if self.format_handler:
+            return self.format_handler
+
+        # Try to auto-detect format
+        try:
+            from ..formats.registry import detect_format
+            return detect_format(package_file)
+        except ImportError:
+            return None
+
+    def _get_capabilities(self, handler: Optional["PackageFormat"]) -> "FormatCapabilities":
+        """Get capabilities for format handler.
+
+        Args:
+            handler: PackageFormat handler or None
+
+        Returns:
+            FormatCapabilities (defaults if no handler)
+        """
+        if handler:
+            return handler.capabilities
+
+        # Default capabilities for legacy .deb handling
+        from ..formats.base import FormatCapabilities
+        return FormatCapabilities(
+            supports_vulnerability_scan=True,
+            supports_virus_scan=True,
+            supports_integrity_check=True,
+            supports_script_analysis=True,
+            supports_binary_check=True,
+            has_maintainer_scripts=True,
+            has_binary_content=True,
+        )
 
     def _save_result(self, result: EnhancedScanResult) -> None:
         """Save enhanced scan result to JSON file.

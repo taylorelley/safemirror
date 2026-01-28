@@ -1,7 +1,8 @@
-"""Maintainer script security analyzer for Debian packages.
+"""Package script security analyzer.
 
-This module analyzes maintainer scripts (preinst, postinst, prerm, postrm)
-for suspicious patterns, dangerous commands, and potential security risks.
+This module analyzes maintainer/lifecycle scripts for suspicious patterns,
+dangerous commands, and potential security risks.
+Supports multiple package formats through the formats abstraction layer.
 """
 
 import re
@@ -10,9 +11,12 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Dict, List, Optional, Set, Tuple
+from typing import ClassVar, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 from ..common.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..formats.base import PackageFormat, ScriptInfo
 
 
 @dataclass
@@ -39,7 +43,10 @@ class ScriptAnalysisResult:
 
 
 class ScriptAnalyzer:
-    """Analyzer for Debian package maintainer scripts."""
+    """Analyzer for package maintainer/lifecycle scripts.
+
+    Supports multiple package formats through format handlers.
+    """
 
     # Dangerous command patterns (regex patterns with severity and description)
     # Using regex to avoid false positives from substring matching
@@ -54,6 +61,18 @@ class ScriptAnalyzer:
         r"\bchown\s+-R\s+root:root\s+/(?:\s|$|;|\||&)": ("high", "Recursive ownership change of root directory"),
         r"/dev/(?:tcp|udp)/": ("medium", "Network device access (reverse shell risk)"),
         r"\b(?:nc|ncat|netcat)\s+-l": ("medium", "Netcat listener (reverse shell risk)"),
+        # Additional patterns for persistence and escalation
+        r"\bnohup\s+.*&": ("medium", "Background persistence with nohup"),
+        r"\bcrontab\s+-": ("medium", "Crontab modification"),
+        r"\bsystemctl\s+(?:enable|start)\s+": ("low", "Service enablement/start"),
+        r"\bservice\s+\S+\s+(?:start|restart)": ("low", "Service manipulation"),
+        r"mkdir\s+-p\s+~/.ssh": ("medium", "SSH directory creation"),
+        r">>?\s*~?/.ssh/authorized_keys": ("high", "SSH key injection"),
+        r"\bperl\s+-e\s+": ("medium", "Perl one-liner execution"),
+        r"\bpython[23]?\s+-c\s+": ("medium", "Python one-liner execution"),
+        r"\bruby\s+-e\s+": ("medium", "Ruby one-liner execution"),
+        r"tar\s+.*\|\s*(?:ba)?sh": ("high", "Tar pipe to shell execution"),
+        r"\b(?:nc|ncat|netcat)\s+-e\s+": ("critical", "Netcat reverse shell"),
     }
 
     # Suspicious patterns
@@ -69,7 +88,7 @@ class ScriptAnalyzer:
         r"setenforce\s+0": ("high", "SELinux disable"),
         r"systemctl\s+disable": ("low", "Service disable"),
         r"crontab.*-r": ("medium", "Crontab removal"),
-        r"(^|;|\|)\s*rm\s+-rf\s+/": ("critical", "Recursive root deletion"),
+        r"(^|;|\|)\s*rm\s+-rf\s+/(?:\s|$|;|\||&)": ("critical", "Recursive root deletion"),
         r"dd\s+if=/dev/(zero|random)": ("high", "Disk overwrite"),
         r">(>)?\s*/dev/(sd|hd|nvme)": ("critical", "Direct disk write"),
         r"mkfs\.\w+": ("critical", "Filesystem creation"),
@@ -102,15 +121,72 @@ class ScriptAnalyzer:
         r"\.\s+": ("low", "Script sourcing"),
     }
 
-    def __init__(self):
-        """Initialize script analyzer."""
-        self.logger = get_logger("script_analyzer")
+    # NPM-specific patterns
+    NPM_DANGEROUS_PATTERNS: ClassVar[Dict[str, Tuple[str, str]]] = {
+        r"child_process": ("high", "Node.js child process execution"),
+        r"require\s*\(\s*['\"]child_process['\"]": ("high", "Child process module import"),
+        r"exec\s*\(": ("medium", "Shell command execution"),
+        r"execSync\s*\(": ("medium", "Synchronous shell command execution"),
+        r"spawn\s*\(": ("medium", "Process spawn"),
+        r"eval\s*\(": ("high", "Dynamic code evaluation"),
+        r"Function\s*\(": ("medium", "Dynamic function creation"),
+        r"require\s*\(\s*['\"]fs['\"]": ("low", "Filesystem access"),
+        r"require\s*\(\s*['\"]net['\"]": ("low", "Network access"),
+        r"require\s*\(\s*['\"]http['\"]": ("low", "HTTP access"),
+        r"process\.env": ("low", "Environment variable access"),
+        # Additional NPM patterns
+        r"node-gyp\b": ("medium", "Native module compilation"),
+        r"prebuild\b": ("medium", "Prebuild hook execution"),
+        r"vm\.runInNewContext": ("high", "VM code execution"),
+        r"vm\.runInThisContext": ("high", "VM code execution in current context"),
+        r"new\s+WebAssembly": ("medium", "WebAssembly instantiation"),
+        r"require\s*\(\s*['\"]crypto['\"]": ("low", "Cryptography access"),
+        r"require\s*\(\s*['\"]dgram['\"]": ("low", "UDP socket access"),
+        r"process\.exit\s*\(": ("medium", "Process termination"),
+        r"os\.platform\s*\(\s*\)": ("low", "Platform detection"),
+        r"process\.binding\s*\(": ("high", "Internal Node binding access"),
+    }
 
-    def analyze_package(self, package_path: str) -> ScriptAnalysisResult:
-        """Analyze all maintainer scripts in a package.
+    # Python-specific patterns
+    PYTHON_DANGEROUS_PATTERNS: ClassVar[Dict[str, Tuple[str, str]]] = {
+        r"subprocess\.(?:call|run|Popen)": ("medium", "Subprocess execution"),
+        r"os\.system\s*\(": ("high", "Shell command execution"),
+        r"os\.popen\s*\(": ("high", "Shell command execution with pipe"),
+        r"eval\s*\(": ("high", "Dynamic code evaluation"),
+        r"exec\s*\(": ("high", "Dynamic code execution"),
+        r"compile\s*\(": ("medium", "Dynamic code compilation"),
+        r"__import__\s*\(": ("medium", "Dynamic module import"),
+        r"ctypes": ("medium", "C library access"),
+        r"pickle\.loads?": ("medium", "Pickle deserialization (potential RCE)"),
+        r"marshal\.loads?": ("high", "Marshal deserialization (potential RCE)"),
+        # Additional Python patterns
+        r"importlib\.import_module\s*\(": ("medium", "Dynamic module loading"),
+        r"socket\.socket\s*\(": ("low", "Direct socket access"),
+        r"urllib\.request\.urlopen\s*\(": ("low", "URL fetch on install"),
+        r"requests\.(?:get|post)\s*\(": ("low", "HTTP request during install"),
+        r"shutil\.rmtree\s*\(": ("medium", "Recursive directory deletion"),
+        r"os\.chmod\s*\(.*0o?7[0-7][0-7]": ("medium", "Permissive chmod"),
+        r"builtins\.open\s*\(": ("low", "Direct builtin file access"),
+        r"zipfile\.ZipFile\s*\(.*extractall": ("medium", "Zip extraction (path traversal risk)"),
+        r"tarfile\.open\s*\(.*extractall": ("medium", "Tar extraction (path traversal risk)"),
+    }
+
+    def __init__(self, format_handler: Optional["PackageFormat"] = None):
+        """Initialize script analyzer.
 
         Args:
-            package_path: Path to .deb package file
+            format_handler: Optional format handler for script extraction
+        """
+        self.logger = get_logger("script_analyzer")
+        self.format_handler = format_handler
+
+    def analyze_package(self, package_path: str) -> ScriptAnalysisResult:
+        """Analyze all maintainer/lifecycle scripts in a package.
+
+        Supports multiple package formats through format handlers.
+
+        Args:
+            package_path: Path to package file
 
         Returns:
             ScriptAnalysisResult with analysis results
@@ -128,14 +204,20 @@ class ScriptAnalyzer:
                 error_message=f"Package file not found: {package_path}",
             )
 
-        self.logger.info(f"Analyzing maintainer scripts in: {package_file.name}")
+        self.logger.info(f"Analyzing scripts in: {package_file.name}")
 
         try:
-            # Extract maintainer scripts
-            scripts = self._extract_maintainer_scripts(package_path)
+            # Get format handler
+            handler = self._get_format_handler(package_file)
+
+            # Extract scripts using format handler or legacy method
+            if handler:
+                scripts = self._extract_scripts_with_handler(package_file, handler)
+            else:
+                scripts = self._extract_maintainer_scripts(package_path)
 
             if not scripts:
-                self.logger.info("No maintainer scripts found in package")
+                self.logger.info("No scripts found in package")
                 return ScriptAnalysisResult(
                     safe=True,
                     scripts_analyzed=[],
@@ -151,7 +233,9 @@ class ScriptAnalyzer:
 
             for script_name, script_content in scripts.items():
                 scripts_analyzed.append(script_name)
-                issues, warnings = self._analyze_script(script_name, script_content)
+                # Determine script type for format-specific analysis
+                script_type = self._detect_script_type(script_name, script_content, handler)
+                issues, warnings = self._analyze_script(script_name, script_content, script_type)
                 all_issues.extend(issues)
                 all_warnings.extend(warnings)
 
@@ -163,11 +247,11 @@ class ScriptAnalyzer:
 
             if not safe:
                 self.logger.warning(
-                    f"Package {package_file.name} has security issues in maintainer scripts: "
+                    f"Package {package_file.name} has security issues in scripts: "
                     f"{len(critical_issues)} critical, {len(high_issues)} high"
                 )
             else:
-                self.logger.info(f"Package {package_file.name} maintainer scripts appear safe")
+                self.logger.info(f"Package {package_file.name} scripts appear safe")
 
             return ScriptAnalysisResult(
                 safe=safe,
@@ -187,6 +271,88 @@ class ScriptAnalyzer:
                 analysis_date=datetime.now().isoformat(),
                 error_message=str(e),
             )
+
+    def _get_format_handler(self, package_file: Path) -> Optional["PackageFormat"]:
+        """Get format handler for package.
+
+        Args:
+            package_file: Path to package file
+
+        Returns:
+            PackageFormat handler or None
+        """
+        if self.format_handler:
+            return self.format_handler
+
+        # Try to auto-detect format
+        try:
+            from ..formats.registry import detect_format
+            return detect_format(package_file)
+        except ImportError:
+            return None
+
+    def _extract_scripts_with_handler(
+        self, package_file: Path, handler: "PackageFormat"
+    ) -> Dict[str, str]:
+        """Extract scripts using format handler.
+
+        Args:
+            package_file: Path to package file
+            handler: Format handler
+
+        Returns:
+            Dictionary of script_name -> script_content
+        """
+        scripts = {}
+
+        try:
+            extracted = handler.extract(package_file)
+            try:
+                for script_info in extracted.scripts:
+                    scripts[script_info.name] = script_info.content
+            finally:
+                extracted.cleanup()
+        except Exception as e:
+            self.logger.warning(f"Handler script extraction failed: {e}")
+            # Fall back to legacy method for .deb
+            if handler.format_name == "deb":
+                return self._extract_maintainer_scripts(str(package_file))
+
+        return scripts
+
+    def _detect_script_type(
+        self, script_name: str, content: str, handler: Optional["PackageFormat"]
+    ) -> str:
+        """Detect script type for format-specific analysis.
+
+        Args:
+            script_name: Name of the script
+            content: Script content
+            handler: Format handler
+
+        Returns:
+            Script type: "shell", "python", "node", or "unknown"
+        """
+        # Check shebang first
+        if content.startswith("#!"):
+            first_line = content.split("\n", 1)[0].lower()
+            if "python" in first_line:
+                return "python"
+            elif "node" in first_line:
+                return "node"
+            elif any(sh in first_line for sh in ["bash", "sh", "zsh", "dash"]):
+                return "shell"
+
+        # Use format handler hints
+        if handler:
+            format_name = handler.format_name
+            if format_name in ("wheel", "sdist"):
+                return "python"
+            elif format_name == "npm":
+                return "node"
+
+        # Default to shell for deb/rpm/apk
+        return "shell"
 
     def _extract_maintainer_scripts(self, package_path: str) -> Dict[str, str]:
         """Extract maintainer scripts from package.
@@ -235,12 +401,15 @@ class ScriptAnalyzer:
 
         return scripts
 
-    def _analyze_script(self, script_name: str, script_content: str) -> Tuple[List[ScriptIssue], List[str]]:
-        """Analyze a single maintainer script for security issues.
+    def _analyze_script(
+        self, script_name: str, script_content: str, script_type: str = "shell"
+    ) -> Tuple[List[ScriptIssue], List[str]]:
+        """Analyze a single script for security issues.
 
         Args:
             script_name: Name of the script
             script_content: Content of the script
+            script_type: Type of script (shell, python, node)
 
         Returns:
             Tuple of (issues, warnings)
@@ -250,18 +419,34 @@ class ScriptAnalyzer:
 
         lines = script_content.splitlines()
 
-        # Check for shebang
-        if lines and not lines[0].startswith("#!"):
+        # Check for shebang (for shell/python scripts)
+        if script_type in ("shell", "python") and lines and not lines[0].startswith("#!"):
             warnings.append(f"{script_name}: Missing shebang")
+
+        # Select patterns based on script type
+        if script_type == "node":
+            extra_patterns = self.NPM_DANGEROUS_PATTERNS
+        elif script_type == "python":
+            extra_patterns = self.PYTHON_DANGEROUS_PATTERNS
+        else:
+            extra_patterns = {}
 
         # Check each line
         for line_num, line in enumerate(lines, start=1):
             # Skip comments and empty lines
             stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
+            if not stripped:
                 continue
 
-            # Check for dangerous commands (using regex patterns)
+            # Skip comments based on script type
+            if script_type == "shell" and stripped.startswith("#"):
+                continue
+            elif script_type == "python" and stripped.startswith("#"):
+                continue
+            elif script_type == "node" and stripped.startswith("//"):
+                continue
+
+            # Check for dangerous commands (shell patterns - always check)
             for pattern, (severity, description) in self.DANGEROUS_COMMANDS.items():
                 if re.search(pattern, line, re.IGNORECASE):
                     issues.append(
@@ -274,13 +459,26 @@ class ScriptAnalyzer:
                         )
                     )
 
-            # Check for suspicious patterns
+            # Check for suspicious patterns (universal)
             for pattern, (severity, description) in self.SUSPICIOUS_PATTERNS.items():
                 if re.search(pattern, line, re.IGNORECASE):
                     issues.append(
                         ScriptIssue(
                             severity=severity,
                             issue_type="suspicious_pattern",
+                            description=description,
+                            line_number=line_num,
+                            code_snippet=line.strip()[:100],
+                        )
+                    )
+
+            # Check format-specific patterns
+            for pattern, (severity, description) in extra_patterns.items():
+                if re.search(pattern, line, re.IGNORECASE):
+                    issues.append(
+                        ScriptIssue(
+                            severity=severity,
+                            issue_type=f"{script_type}_pattern",
                             description=description,
                             line_number=line_num,
                             code_snippet=line.strip()[:100],
@@ -321,9 +519,10 @@ class ScriptAnalyzer:
         env_issues = self._check_environment_variables(script_content)
         issues.extend(env_issues)
 
-        # Check for insecure temp file usage
-        temp_issues = self._check_temp_file_usage(script_content)
-        issues.extend(temp_issues)
+        # Check for insecure temp file usage (shell scripts)
+        if script_type == "shell":
+            temp_issues = self._check_temp_file_usage(script_content)
+            issues.extend(temp_issues)
 
         return issues, warnings
 

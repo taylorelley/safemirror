@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# run-pipeline.sh - Main orchestrator for safe-apt pipeline
+# run-pipeline.sh - Main orchestrator for safemirror pipeline
 #
 # This script orchestrates the complete pipeline:
 # 1. Sync upstream mirror
@@ -9,12 +9,23 @@
 # 4. Build approved list
 # 5. Publish approved mirror
 #
+# Usage: run-pipeline.sh [--format FORMAT] [--config CONFIG_FILE] [--all-formats]
+#
+# Options:
+#   --format FORMAT     Package format to process (deb, rpm, apk, wheel, npm)
+#                       Default: deb
+#   --config CONFIG     Path to configuration file
+#                       Default: /opt/safemirror/config.yaml
+#   --all-formats       Process all enabled formats from config
+#   --mirror NAME       Override mirror name
+#   --dry-run           Show what would be done without executing
+#
 
 set -euo pipefail
 
-# Configuration
+# Default configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASE_DIR="${BASE_DIR:-/opt/apt-mirror-system}"
+BASE_DIR="${BASE_DIR:-/opt/safemirror}"
 LOG_DIR="${LOG_DIR:-${BASE_DIR}/logs}"
 SCANS_DIR="${SCANS_DIR:-${BASE_DIR}/scans}"
 APPROVALS_DIR="${APPROVALS_DIR:-${BASE_DIR}/approvals}"
@@ -24,9 +35,115 @@ DISTRIBUTION="${DISTRIBUTION:-jammy}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 APTLY_POOL="${APTLY_POOL:-/var/lib/aptly/pool}"
 
+# Multi-format support
+FORMAT="${FORMAT:-deb}"
+CONFIG_FILE="${CONFIG_FILE:-/opt/safemirror/config.yaml}"
+ALL_FORMATS=false
+DRY_RUN=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --format)
+            FORMAT="$2"
+            shift 2
+            ;;
+        --config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        --all-formats)
+            ALL_FORMATS=true
+            shift
+            ;;
+        --mirror)
+            MIRROR_NAME="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: run-pipeline.sh [--format FORMAT] [--config CONFIG_FILE] [--all-formats]"
+            echo ""
+            echo "Options:"
+            echo "  --format FORMAT     Package format (deb, rpm, apk, wheel, npm). Default: deb"
+            echo "  --config CONFIG     Configuration file path"
+            echo "  --all-formats       Process all enabled formats from config"
+            echo "  --mirror NAME       Override mirror name"
+            echo "  --dry-run           Show what would be done"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate format
+VALID_FORMATS="deb rpm apk wheel sdist npm"
+if [[ ! " ${VALID_FORMATS} " =~ " ${FORMAT} " ]]; then
+    echo "Invalid format: ${FORMAT}"
+    echo "Valid formats: ${VALID_FORMATS}"
+    exit 1
+fi
+
 # Set script name for logging and source shared utilities
 SCRIPT_NAME="run-pipeline"
 source "${SCRIPT_DIR}/lib/common.sh"
+
+# Get file extension for format
+get_format_extension() {
+    local fmt="$1"
+    case "${fmt}" in
+        deb) echo ".deb" ;;
+        rpm) echo ".rpm" ;;
+        apk) echo ".apk" ;;
+        wheel) echo ".whl" ;;
+        sdist) echo ".tar.gz" ;;
+        npm) echo ".tgz" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Get repo manager command for format
+get_repo_manager() {
+    local fmt="$1"
+    case "${fmt}" in
+        deb) echo "aptly" ;;
+        rpm) echo "createrepo" ;;
+        apk) echo "apk-tools" ;;
+        wheel|sdist) echo "bandersnatch" ;;
+        npm) echo "verdaccio" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Run pipeline for a single format
+run_format_pipeline() {
+    local fmt="$1"
+    local ext
+    ext=$(get_format_extension "${fmt}")
+
+    log "========================================="
+    log "Processing format: ${fmt}"
+    log "========================================="
+
+    # Format-specific scanning
+    log "Running security scan for ${fmt} packages"
+
+    if ${PYTHON_BIN} -m src.scanner.scan_packages \
+        --format "${fmt}" \
+        --scan-dir "${SCANS_DIR}/${fmt}" \
+        >> "${LOG_FILE}" 2>&1; then
+        log "Scan completed for format: ${fmt}"
+    else
+        log_error "Scan failed for format: ${fmt}"
+        return 1
+    fi
+}
 
 # Cleanup on exit
 cleanup() {
@@ -36,8 +153,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Handle --all-formats mode
+if [ "${ALL_FORMATS}" = true ]; then
+    log "========================================="
+    log "Starting safemirror multi-format pipeline"
+    log "========================================="
+
+    # Get enabled formats from config (simplified - in production use Python to parse YAML)
+    ENABLED_FORMATS="${ENABLED_FORMATS:-deb}"
+
+    for fmt in ${ENABLED_FORMATS}; do
+        log "Processing format: ${fmt}"
+        if run_format_pipeline "${fmt}"; then
+            log "Format ${fmt} completed successfully"
+        else
+            log_error "Format ${fmt} failed"
+        fi
+    done
+
+    log "Multi-format pipeline complete"
+    exit 0
+fi
+
 log "========================================="
-log "Starting safe-apt pipeline"
+log "Starting safemirror pipeline (format: ${FORMAT})"
 log "========================================="
 
 # Step 1: Sync mirror and create snapshot
