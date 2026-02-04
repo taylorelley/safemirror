@@ -20,3 +20,4 @@ redis>=5.0.1
 
 # Utilities
 httpx>=0.26.0
+python-slugify>=8.0.0
