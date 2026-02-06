@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from slugify import slugify
 from jose import jwt
@@ -18,10 +19,25 @@ from enterprise.core.security import (
     revoke_session,
     revoke_user_sessions,
 )
+from enterprise.core.password_reset import (
+    create_reset_token,
+    verify_reset_token,
+    use_reset_token,
+)
 from enterprise.core.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+
+
+# Password reset schemas
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -117,6 +133,66 @@ def login(
 def get_me(current_user: User = Depends(get_current_user)):
     """Get current user info."""
     return current_user
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_200_OK)
+def request_password_reset(
+    reset_request: PasswordResetRequest,
+    db: Session = Depends(get_db)
+):
+    """Request a password reset token.
+    
+    Always returns success to prevent email enumeration.
+    """
+    user = db.query(User).filter(User.email == reset_request.email).first()
+    
+    if user:
+        # Create reset token
+        reset_token, plain_token = create_reset_token(user.id, db)
+        
+        # TODO: Send email with reset link
+        # In production, this would send an email with a link like:
+        # https://safemirror.example.com/reset-password?token={plain_token}
+        # For now, we just return success
+        
+        # In dev mode, include token in response (REMOVE IN PRODUCTION!)
+        if settings.debug:
+            return {
+                "message": "Password reset email sent",
+                "debug_token": plain_token  # REMOVE IN PRODUCTION!
+            }
+    
+    return {"message": "If that email exists, a password reset link has been sent"}
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_200_OK)
+def confirm_password_reset(
+    reset_confirm: PasswordResetConfirm,
+    db: Session = Depends(get_db)
+):
+    """Confirm password reset with token and set new password."""
+    # Verify token
+    user_id = verify_reset_token(reset_confirm.token, db)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+    
+    # Hash new password and use token
+    new_password_hash = get_password_hash(reset_confirm.new_password)
+    success = use_reset_token(reset_confirm.token, new_password_hash, db)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to reset password"
+        )
+    
+    # Revoke all existing sessions for security
+    revoke_user_sessions(user_id, db)
+    
+    return {"message": "Password successfully reset"}
 
 
 @router.get("/sessions")
