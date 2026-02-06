@@ -3,11 +3,207 @@
 import io
 import gzip
 import json
+import os
 import tarfile
 import zipfile
+
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+
+from enterprise.db.base import Base
+from enterprise.db.models import Organization, Role, User, Policy, Scan, AuditLog
+
+
+# ---------------------------------------------------------------------------
+# Database configuration
+# ---------------------------------------------------------------------------
+
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql://safemirror:devpass@localhost:5432/safemirror_test",
+)
+
+_FALLBACK_DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://safemirror:devpass@localhost:5432/safemirror",
+)
+
+
+def _db_reachable(url: str) -> bool:
+    try:
+        eng = create_engine(url)
+        with eng.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        eng.dispose()
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped: engine + table creation (once per test run)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def db_engine():
+    """Create a SQLAlchemy engine for the test database.
+
+    Tries ``TEST_DATABASE_URL`` first (default: ``safemirror_test``), then
+    falls back to ``DATABASE_URL`` (the dev database).  Skips all DB tests
+    when no database is reachable.
+
+    Tables are created at session start and dropped at session end.
+    """
+    url = TEST_DATABASE_URL if _db_reachable(TEST_DATABASE_URL) else _FALLBACK_DATABASE_URL
+    if not _db_reachable(url):
+        pytest.skip("No PostgreSQL database reachable — skipping DB tests")
+
+    engine = create_engine(url, echo=False)
+    Base.metadata.create_all(engine)
+
+    yield engine
+
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def _session_factory(db_engine):
+    """Internal: bound sessionmaker for the test engine."""
+    return sessionmaker(bind=db_engine)
+
+
+# ---------------------------------------------------------------------------
+# Function-scoped: one session per test, rolled back automatically
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def db_session(db_engine, _session_factory):
+    """Provide a transactional database session that rolls back after each test.
+
+    Usage::
+
+        def test_something(db_session):
+            org = Organization(name="Acme", slug="acme")
+            db_session.add(org)
+            db_session.flush()
+            assert org.id is not None
+            # rolls back automatically — no cleanup needed
+    """
+    connection = db_engine.connect()
+    transaction = connection.begin()
+    session = _session_factory(bind=connection)
+
+    yield session
+
+    session.close()
+    transaction.rollback()
+    connection.close()
+
+
+# ---------------------------------------------------------------------------
+# Module-scoped session (for heavier integration tests)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def db_session_module(db_engine, _session_factory):
+    """Module-scoped database session — shared across tests in one module.
+
+    Data persists between tests in the same module.  All application tables
+    are truncated at teardown.
+    """
+    session = _session_factory()
+    yield session
+    session.close()
+
+    with db_engine.connect() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(table.delete())
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Factory fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def org_factory(db_session):
+    """Factory for creating test organizations.
+
+    Usage::
+
+        def test_org(org_factory):
+            org = org_factory(name="Acme Corp")
+    """
+    from tests.factories import create_organization
+
+    def _make(**kwargs):
+        return create_organization(db_session, **kwargs)
+
+    return _make
+
+
+@pytest.fixture()
+def role_factory(db_session):
+    """Factory for creating test roles."""
+    from tests.factories import create_role
+
+    def _make(**kwargs):
+        return create_role(db_session, **kwargs)
+
+    return _make
+
+
+@pytest.fixture()
+def user_factory(db_session):
+    """Factory for creating test users."""
+    from tests.factories import create_user
+
+    def _make(**kwargs):
+        return create_user(db_session, **kwargs)
+
+    return _make
+
+
+@pytest.fixture()
+def policy_factory(db_session):
+    """Factory for creating test policies."""
+    from tests.factories import create_policy
+
+    def _make(**kwargs):
+        return create_policy(db_session, **kwargs)
+
+    return _make
+
+
+@pytest.fixture()
+def scan_factory(db_session):
+    """Factory for creating test scans."""
+    from tests.factories import create_scan
+
+    def _make(**kwargs):
+        return create_scan(db_session, **kwargs)
+
+    return _make
+
+
+@pytest.fixture()
+def audit_log_factory(db_session):
+    """Factory for creating test audit log entries."""
+    from tests.factories import create_audit_log
+
+    def _make(**kwargs):
+        return create_audit_log(db_session, **kwargs)
+
+    return _make
 
 
 @pytest.fixture

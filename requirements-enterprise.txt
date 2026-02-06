@@ -18,6 +18,9 @@ pydantic-settings>=2.1.0
 celery>=5.3.6
 redis>=5.0.1
 
+# Dev reload
+watchfiles>=0.21.0
+
 # Utilities
 httpx>=0.26.0
 python-slugify>=8.0.0

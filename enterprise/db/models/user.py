@@ -26,3 +26,6 @@ class User(Base):
     role = relationship("Role", back_populates="users")
     scans = relationship("Scan", back_populates="user")
     audit_logs = relationship("AuditLog", back_populates="user")
+    sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+    api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")

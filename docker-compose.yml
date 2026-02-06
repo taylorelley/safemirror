@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file: .env
     environment:
       - DATABASE_URL=postgresql://safemirror:${DB_PASSWORD:-devpass}@db:5432/safemirror
       - REDIS_URL=redis://redis:6379/0
@@ -20,12 +21,35 @@ services:
     volumes:
       - ./enterprise:/app/enterprise
       - ./src:/app/src
-    command: uvicorn enterprise.api.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      uvicorn enterprise.api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir enterprise
+      --reload-dir src
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=true
+    depends_on:
+      - api
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/next.config.ts:/app/next.config.ts
 
   db:
     image: postgres:15-alpine
@@ -53,6 +77,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file: .env
     environment:
       - DATABASE_URL=postgresql://safemirror:${DB_PASSWORD:-devpass}@db:5432/safemirror
       - REDIS_URL=redis://redis:6379/0
@@ -65,7 +90,11 @@ services:
     volumes:
       - ./enterprise:/app/enterprise
       - ./src:/app/src
-    command: celery -A enterprise.workers worker -l info
+    command: >
+      watchfiles
+      --filter python
+      'celery -A enterprise.workers worker -l info'
+      enterprise/ src/
 
 volumes:
   postgres_data:

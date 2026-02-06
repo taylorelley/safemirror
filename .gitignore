@@ -72,3 +72,15 @@ temp/
 
 # Aptly data (if testing locally)
 .aptly/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
