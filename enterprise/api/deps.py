@@ -30,7 +30,8 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    user_id = decode_token(token)
+    # Pass db session to decode_token for session revocation check
+    user_id = decode_token(token, db)
     if user_id is None:
         raise credentials_exception
     
