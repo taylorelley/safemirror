@@ -1,0 +1,730 @@
+{
+  "info": {
+    "_postman_id": "safemirror-enterprise-api",
+    "name": "SafeMirror Enterprise API",
+    "description": "SafeMirror Enterprise API Collection\\n\\nThis collection includes all 62 API endpoints for SafeMirror Enterprise.\\n\\n## Authentication\\n\\nThe API supports two authentication methods:\\n1. **JWT Bearer Token** - Obtained via /api/auth/login\\n2. **API Key** - Via X-API-Key header\\n\\n## Getting Started\\n\\n1. Set the `base_url` variable to your SafeMirror instance\\n2. Use the \"Login\" request to get a JWT token\\n3. The token is automatically saved to the `access_token` variable\\n\\n## Rate Limits\\n\\n- Authenticated: 200 requests/minute\\n- Unauthenticated: 100 requests/minute\\n- Login: 5 requests/minute",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Basic health check endpoint."
+          }
+        },
+        {
+          "name": "Liveness Probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/live",
+              "host": ["{{base_url}}"],
+              "path": ["health", "live"]
+            },
+            "description": "Kubernetes liveness probe."
+          }
+        },
+        {
+          "name": "Readiness Probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/ready",
+              "host": ["{{base_url}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Kubernetes readiness probe with DB and Redis checks."
+          }
+        },
+        {
+          "name": "Detailed Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/detailed",
+              "host": ["{{base_url}}"],
+              "path": ["health", "detailed"]
+            },
+            "description": "Detailed health check with system metrics."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"email\\\": \\\"admin@example.com\\\",\\n  \\\"password\\\": \\\"SecurePassword123!\\\",\\n  \\\"name\\\": \\\"Admin User\\\",\\n  \\\"org_name\\\": \\\"My Organization\\\"\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "Register a new user and organization."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access_token) {",
+                  "    pm.environment.set(\"access_token\", jsonData.access_token);",
+                  "    pm.collectionVariables.set(\"access_token\", jsonData.access_token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "username", "value": "admin@example.com"},
+                {"key": "password", "value": "SecurePassword123!"}
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Login and get JWT access token."
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "Get current authenticated user info."
+          }
+        },
+        {
+          "name": "Request Password Reset",
+          "request": {
+            "auth": {"type": "noauth"},
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"email\\\": \\\"user@example.com\\\"\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/password-reset/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "password-reset", "request"]
+            },
+            "description": "Request a password reset token."
+          }
+        },
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/sessions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "sessions"]
+            },
+            "description": "List all active sessions for current user."
+          }
+        },
+        {
+          "name": "Revoke All Sessions",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/sessions/revoke-all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "sessions", "revoke-all"]
+            },
+            "description": "Revoke all sessions except current."
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "item": [
+        {
+          "name": "List API Keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/api-keys",
+              "host": ["{{base_url}}"],
+              "path": ["api", "api-keys"]
+            },
+            "description": "List all API keys for current user."
+          }
+        },
+        {
+          "name": "Create API Key",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"name\\\": \\\"CI/CD Key\\\",\\n  \\\"scopes\\\": [\\\"packages:read\\\", \\\"approvals:read\\\"],\\n  \\\"expires_in_days\\\": 90\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/api-keys",
+              "host": ["{{base_url}}"],
+              "path": ["api", "api-keys"]
+            },
+            "description": "Create a new API key."
+          }
+        },
+        {
+          "name": "Revoke API Key",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/api-keys/:key_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "api-keys", ":key_id"],
+              "variable": [{"key": "key_id", "value": ""}]
+            },
+            "description": "Revoke an API key."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "List Roles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/roles",
+              "host": ["{{base_url}}"],
+              "path": ["api", "roles"]
+            }
+          }
+        },
+        {
+          "name": "Create Role",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"name\\\": \\\"Custom Role\\\",\\n  \\\"permissions\\\": [\\\"packages:read\\\", \\\"approvals:list\\\"]\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/roles",
+              "host": ["{{base_url}}"],
+              "path": ["api", "roles"]
+            }
+          }
+        },
+        {
+          "name": "Get Role",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/roles/:role_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "roles", ":role_id"],
+              "variable": [{"key": "role_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Update Role",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"name\\\": \\\"Updated Role\\\",\\n  \\\"permissions\\\": [\\\"packages:read\\\", \\\"approvals:*\\\"]\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/roles/:role_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "roles", ":role_id"],
+              "variable": [{"key": "role_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Delete Role",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/roles/:role_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "roles", ":role_id"],
+              "variable": [{"key": "role_id", "value": ""}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mirrors",
+      "item": [
+        {
+          "name": "List Mirrors",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/mirrors",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mirrors"]
+            }
+          }
+        },
+        {
+          "name": "Create Mirror",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"name\\\": \\\"Ubuntu Jammy\\\",\\n  \\\"mirror_type\\\": \\\"apt\\\",\\n  \\\"url\\\": \\\"http://archive.ubuntu.com/ubuntu\\\",\\n  \\\"distribution\\\": \\\"jammy\\\",\\n  \\\"components\\\": [\\\"main\\\", \\\"universe\\\"]\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/mirrors",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mirrors"]
+            }
+          }
+        },
+        {
+          "name": "Get Mirror",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/mirrors/:mirror_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mirrors", ":mirror_id"],
+              "variable": [{"key": "mirror_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Sync Mirror",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/mirrors/:mirror_id/sync",
+              "host": ["{{base_url}}"],
+              "path": ["api", "mirrors", ":mirror_id", "sync"],
+              "variable": [{"key": "mirror_id", "value": ""}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Packages",
+      "item": [
+        {
+          "name": "List Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/packages?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "packages"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "per_page", "value": "20"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Package",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/packages/:package_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "packages", ":package_id"],
+              "variable": [{"key": "package_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Search Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/packages/search?q=nginx",
+              "host": ["{{base_url}}"],
+              "path": ["api", "packages", "search"],
+              "query": [{"key": "q", "value": "nginx"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approvals",
+      "item": [
+        {
+          "name": "List Approvals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/approvals?page=1&per_page=20&pending_only=true",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "per_page", "value": "20"},
+                {"key": "pending_only", "value": "true"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Approval",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/approvals/:approval_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals", ":approval_id"],
+              "variable": [{"key": "approval_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Approve Package",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"comment\\\": \\\"Approved after security review\\\"\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/approvals/:approval_id/approve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals", ":approval_id", "approve"],
+              "variable": [{"key": "approval_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Reject Package",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"comment\\\": \\\"Critical CVE found - CVE-2024-1234\\\"\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/approvals/:approval_id/reject",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals", ":approval_id", "reject"],
+              "variable": [{"key": "approval_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Batch Approve",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"request_ids\\\": [\\\"uuid1\\\", \\\"uuid2\\\"],\\n  \\\"comment\\\": \\\"Batch approval for low-risk packages\\\"\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/approvals/batch/approve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "approvals", "batch", "approve"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Policies",
+      "item": [
+        {
+          "name": "List Policies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/policies",
+              "host": ["{{base_url}}"],
+              "path": ["api", "policies"]
+            }
+          }
+        },
+        {
+          "name": "Create Policy",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"name\\\": \\\"Strict Security\\\",\\n  \\\"rules\\\": {\\n    \\\"max_severity\\\": \\\"medium\\\",\\n    \\\"max_cvss\\\": 6.9,\\n    \\\"allow_binaries\\\": true\\n  }\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/policies",
+              "host": ["{{base_url}}"],
+              "path": ["api", "policies"]
+            }
+          }
+        },
+        {
+          "name": "Get Policy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/policies/:policy_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "policies", ":policy_id"],
+              "variable": [{"key": "policy_id", "value": ""}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Scans",
+      "item": [
+        {
+          "name": "List Scans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/scans?page=1&per_page=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "scans"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "per_page", "value": "20"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Scan",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/scans/:scan_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "scans", ":scan_id"],
+              "variable": [{"key": "scan_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Trigger Scan",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"package_id\\\": \\\"package-uuid\\\"\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/scans",
+              "host": ["{{base_url}}"],
+              "path": ["api", "scans"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "List Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit?page=1&per_page=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "per_page", "value": "50"}
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Audit Log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/:log_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", ":log_id"],
+              "variable": [{"key": "log_id", "value": ""}]
+            }
+          }
+        },
+        {
+          "name": "Export Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/audit/export?format=csv",
+              "host": ["{{base_url}}"],
+              "path": ["api", "audit", "export"],
+              "query": [{"key": "format", "value": "csv"}]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Get Preferences",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notifications/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notifications", "preferences"]
+            }
+          }
+        },
+        {
+          "name": "Update Preferences",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"email_enabled\\\": true,\\n  \\\"approval_requested\\\": true,\\n  \\\"critical_vulnerability\\\": true\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/notifications/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notifications", "preferences"]
+            }
+          }
+        },
+        {
+          "name": "List Webhooks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notifications/webhooks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notifications", "webhooks"]
+            }
+          }
+        },
+        {
+          "name": "Create Webhook",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\\n  \\\"name\\\": \\\"Slack Notifications\\\",\\n  \\\"url\\\": \\\"https://hooks.slack.com/services/xxx\\\",\\n  \\\"events\\\": [\\\"approval_requested\\\", \\\"critical_vulnerability\\\"]\\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/notifications/webhooks",
+              "host": ["{{base_url}}"],
+              "path": ["api", "notifications", "webhooks"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
