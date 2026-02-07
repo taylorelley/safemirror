@@ -1,0 +1,26 @@
+apiVersion: v2
+name: safemirror
+description: SafeMirror Enterprise - Package Security Scanning Platform
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+keywords:
+  - security
+  - package-management
+  - vulnerability-scanning
+  - enterprise
+home: https://safemirror.io
+sources:
+  - https://github.com/safemirror/safemirror
+maintainers:
+  - name: SafeMirror Team
+    email: support@safemirror.io
+dependencies:
+  - name: postgresql
+    version: "14.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled

@@ -1,0 +1,78 @@
+{{- if .Values.beat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "safemirror.fullname" . }}-beat
+  labels:
+    {{- include "safemirror.labels" . | nindent 4 }}
+    app.kubernetes.io/component: beat
+spec:
+  replicas: 1  # Beat should only have 1 replica
+  selector:
+    matchLabels:
+      {{- include "safemirror.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        {{- include "safemirror.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: beat
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "safemirror.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: beat
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.global.imageRegistry }}{{ .Values.beat.image.repository }}:{{ include "safemirror.imageTag" . }}"
+          imagePullPolicy: {{ .Values.beat.image.pullPolicy }}
+          command:
+            - celery
+            - -A
+            - enterprise.workers
+            - beat
+            - -l
+            - info
+          env:
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safemirror.secretName" . }}
+                  key: {{ .Values.secrets.databasePasswordKey }}
+            - name: DATABASE_URL
+              value: {{ include "safemirror.databaseUrl" . | quote }}
+            - name: REDIS_URL
+              value: {{ include "safemirror.redisUrl" . | quote }}
+            - name: CELERY_BROKER_URL
+              value: {{ include "safemirror.redisUrl" . | quote }}
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "safemirror.secretName" . }}
+                  key: {{ .Values.secrets.secretKeyKey }}
+          resources:
+            {{- toYaml .Values.beat.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.beat.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.beat.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.beat.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
