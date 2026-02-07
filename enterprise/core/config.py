@@ -8,6 +8,20 @@ class Settings(BaseSettings):
     app_name: str = "SafeMirror Enterprise"
     debug: bool = False
     
+    # CORS
+    cors_origins: str = "http://localhost:3000"
+    
+    # Allowed hosts
+    allowed_hosts: str = "localhost"
+    
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+    
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        return [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
+    
     # Database
     database_url: str = "postgresql://safemirror:devpass@localhost:5432/safemirror"
     

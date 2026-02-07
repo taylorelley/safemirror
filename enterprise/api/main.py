@@ -28,10 +28,10 @@ app.add_middleware(SecurityHeadersMiddleware)
 if settings.rate_limit_enabled:
     app.add_middleware(RateLimitMiddleware)
 
-# CORS middleware
+# CORS middleware - origins from environment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else [],
+    allow_origins=settings.cors_origins_list if settings.cors_origins_list else (["*"] if settings.debug else []),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
