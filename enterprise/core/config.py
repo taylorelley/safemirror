@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -13,11 +14,36 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
     
+    # Celery
+    celery_broker_url: Optional[str] = None
+    celery_result_backend: Optional[str] = None
+    
+    @property
+    def celery_broker(self) -> str:
+        return self.celery_broker_url or self.redis_url
+    
+    @property
+    def celery_backend(self) -> str:
+        return self.celery_result_backend or self.redis_url
+    
     # Security
     secret_key: str = "dev-secret-key-change-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    
+    # Notifications
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from_email: str = "noreply@safemirror.local"
+    smtp_from_name: str = "SafeMirror"
+    smtp_use_tls: bool = True
+    
+    # Webhooks
+    webhook_timeout: int = 30
+    webhook_max_retries: int = 3
     
     model_config = SettingsConfigDict(
         env_file=".env",
