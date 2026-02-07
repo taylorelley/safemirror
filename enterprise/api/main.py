@@ -7,6 +7,7 @@ from enterprise.api.routers import (
     audit, approvals, policies, mirror_assignments, notifications
 )
 from enterprise.api.middleware.audit import AuditMiddleware
+from enterprise.api.middleware.security_headers import SecurityHeadersMiddleware
 
 settings = get_settings()
 
@@ -17,6 +18,9 @@ app = FastAPI(
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,
 )
+
+# Security headers middleware (outermost - runs last on response)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS middleware
 app.add_middleware(

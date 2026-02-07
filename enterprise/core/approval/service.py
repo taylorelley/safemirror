@@ -76,7 +76,7 @@ class ApprovalService:
             scan_id=scan_id,
             requested_by=requested_by,
             state=ApprovalState.PENDING.value,
-            extra_data=metadata or {},
+            metadata=metadata or {},
         )
         
         self.db.add(request)
@@ -152,7 +152,7 @@ class ApprovalService:
             transition,
             comment=comment,
             user_id=user_id,
-            extra_data=metadata,
+            metadata=metadata,
         )
         
         # Update request
@@ -168,7 +168,7 @@ class ApprovalService:
             transition=transition.value,
             user_id=user_id,
             comment=comment,
-            extra_data=metadata or {},
+            metadata=metadata or {},
         )
         self.db.add(history)
         

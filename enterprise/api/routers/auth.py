@@ -252,8 +252,8 @@ def revoke_all_sessions(
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         current_jti = payload.get("jti")
-    except:
-        pass
+    except (jwt.JWTError, Exception):
+        pass  # If token decode fails, revoke all sessions (safe default)
     
     count = revoke_user_sessions(current_user.id, db, except_jti=current_jti)
     return {"revoked": count}
