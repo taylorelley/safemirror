@@ -22,3 +22,4 @@ class Session(Base):
     
     # Relationships
     user = relationship("User", back_populates="sessions")
+    audit_logs = relationship("AuditLog", back_populates="session")
