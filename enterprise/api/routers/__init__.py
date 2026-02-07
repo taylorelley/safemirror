@@ -9,6 +9,8 @@ from . import scans
 from . import audit
 from . import approvals
 from . import policies
+from . import mirror_assignments
+from . import notifications
 
 __all__ = [
     "auth",
@@ -20,5 +22,6 @@ __all__ = [
     "audit",
     "approvals",
     "policies",
+    "mirror_assignments",
+    "notifications",
 ]
-from . import mirror_assignments

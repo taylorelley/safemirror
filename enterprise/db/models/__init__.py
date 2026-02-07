@@ -13,6 +13,13 @@ from enterprise.db.models.password_reset_token import PasswordResetToken
 from enterprise.db.models.mirror import Mirror, MirrorRoleAssignment
 from enterprise.db.models.package import Package
 from enterprise.db.models.approval import ApprovalRequest, ApprovalHistory
+from enterprise.db.models.notification import (
+    NotificationPreference,
+    WebhookConfig,
+    NotificationLog,
+    NotificationChannel,
+    NotificationEventType,
+)
 
 __all__ = [
     "Organization",
@@ -31,4 +38,9 @@ __all__ = [
     "Package",
     "ApprovalRequest",
     "ApprovalHistory",
+    "NotificationPreference",
+    "WebhookConfig",
+    "NotificationLog",
+    "NotificationChannel",
+    "NotificationEventType",
 ]

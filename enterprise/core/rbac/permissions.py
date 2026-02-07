@@ -32,6 +32,10 @@ class Resource(str, Enum):
     ROLES = "roles"               # Role definitions
     API_KEYS = "api_keys"         # API key management
     
+    # Notifications
+    NOTIFICATIONS = "notifications"  # Notification preferences
+    WEBHOOKS = "webhooks"            # Webhook configurations
+    
     # Audit and compliance
     AUDIT_LOGS = "audit_logs"     # System audit trail
     REPORTS = "reports"           # Compliance reports
@@ -108,6 +112,12 @@ PERMISSION_MATRIX: dict[Resource, FrozenSet[Action]] = {
     ]),
     Resource.API_KEYS: frozenset([
         Action.CREATE, Action.READ, Action.DELETE, Action.LIST,
+    ]),
+    Resource.NOTIFICATIONS: frozenset([
+        Action.READ, Action.UPDATE,
+    ]),
+    Resource.WEBHOOKS: frozenset([
+        Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.LIST,
     ]),
     Resource.AUDIT_LOGS: frozenset([
         Action.READ, Action.LIST, Action.EXPORT,
