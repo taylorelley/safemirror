@@ -25,3 +25,4 @@ class Organization(Base):
     audit_logs = relationship("AuditLog", back_populates="organization")
     api_keys = relationship("APIKey", back_populates="organization", cascade="all, delete-orphan")
     sso_configs = relationship("SSOConfig", back_populates="organization", cascade="all, delete-orphan")
+    mirrors = relationship("Mirror", back_populates="organization", cascade="all, delete-orphan")
