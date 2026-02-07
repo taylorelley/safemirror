@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from enterprise.core.config import get_settings
-from enterprise.api.routers import auth, api_keys
+from enterprise.api.routers import auth, api_keys, roles, mirrors, packages, scans, audit, approvals, policies
 from enterprise.api.middleware.audit import AuditMiddleware
 
 settings = get_settings()
@@ -30,6 +30,13 @@ app.add_middleware(AuditMiddleware)
 # Include routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(api_keys.router, prefix="/api")
+app.include_router(roles.router, prefix="/api")
+app.include_router(mirrors.router, prefix="/api")
+app.include_router(packages.router, prefix="/api")
+app.include_router(scans.router, prefix="/api")
+app.include_router(approvals.router, prefix="/api")
+app.include_router(policies.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 
 
 @app.get("/health")
