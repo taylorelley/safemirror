@@ -9,10 +9,10 @@ services:
       - "8000:8000"
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://safemirror:${DB_PASSWORD:-devpass}@db:5432/safemirror
+      - DATABASE_URL=postgresql://safemirror:\${DB_PASSWORD:-devpass}@db:5432/safemirror
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-prod}
-      - DEBUG=${DEBUG:-true}
+      - SECRET_KEY=\${SECRET_KEY:-dev-secret-key-change-in-prod}
+      - DEBUG=\${DEBUG:-true}
     depends_on:
       db:
         condition: service_healthy
@@ -53,10 +53,12 @@ services:
 
   db:
     image: postgres:15-alpine
+    ports:
+      - "5433:5432"
     environment:
       - POSTGRES_DB=safemirror
       - POSTGRES_USER=safemirror
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-devpass}
+      - POSTGRES_PASSWORD=\${DB_PASSWORD:-devpass}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -79,9 +81,9 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://safemirror:${DB_PASSWORD:-devpass}@db:5432/safemirror
+      - DATABASE_URL=postgresql://safemirror:\${DB_PASSWORD:-devpass}@db:5432/safemirror
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-prod}
+      - SECRET_KEY=\${SECRET_KEY:-dev-secret-key-change-in-prod}
     depends_on:
       db:
         condition: service_healthy
