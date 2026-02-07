@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     
+    # Rate Limiting
+    rate_limit_enabled: bool = True
+    rate_limit_default: int = 100  # requests per window
+    rate_limit_window: int = 60  # seconds
+    rate_limit_auth: int = 200  # authenticated users
+    rate_limit_login: int = 5  # login attempts
+    
     # Notifications
     smtp_host: Optional[str] = None
     smtp_port: int = 587

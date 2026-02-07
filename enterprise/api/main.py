@@ -6,8 +6,10 @@ from enterprise.api.routers import (
     auth, api_keys, roles, mirrors, packages, scans, 
     audit, approvals, policies, mirror_assignments, notifications
 )
+from enterprise.api.routers.health import router as health_router
 from enterprise.api.middleware.audit import AuditMiddleware
 from enterprise.api.middleware.security_headers import SecurityHeadersMiddleware
+from enterprise.api.middleware.rate_limit import RateLimitMiddleware
 
 settings = get_settings()
 
@@ -22,6 +24,10 @@ app = FastAPI(
 # Security headers middleware (outermost - runs last on response)
 app.add_middleware(SecurityHeadersMiddleware)
 
+# Rate limiting middleware
+if settings.rate_limit_enabled:
+    app.add_middleware(RateLimitMiddleware)
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -34,7 +40,10 @@ app.add_middleware(
 # Audit middleware - logs all API requests
 app.add_middleware(AuditMiddleware)
 
-# Include routers
+# Health check router (no prefix, at root level)
+app.include_router(health_router)
+
+# Include API routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(api_keys.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
@@ -46,11 +55,6 @@ app.include_router(policies.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(mirror_assignments.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
-
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "version": "0.2.0"}
 
 
 @app.get("/")
