@@ -1,626 +1,484 @@
-# safe-apt Deployment Guide
+# SafeMirror Enterprise - Deployment Guide
 
-This guide provides detailed instructions for deploying safe-apt in production environments.
+This guide covers deploying SafeMirror Enterprise in various environments.
 
 ## Table of Contents
 
-1. [Prerequisites](#prerequisites)
-2. [System Requirements](#system-requirements)
-3. [Installation](#installation)
-4. [Configuration](#configuration)
-5. [Initial Setup](#initial-setup)
-6. [Security Hardening](#security-hardening)
-7. [Monitoring](#monitoring)
-8. [Maintenance](#maintenance)
-9. [Troubleshooting](#troubleshooting)
-10. [Disaster Recovery](#disaster-recovery)
+1. [Quick Start](#quick-start)
+2. [Docker Deployment](#docker-deployment)
+3. [Kubernetes Deployment](#kubernetes-deployment)
+4. [Cloud Deployments](#cloud-deployments)
+5. [Environment Variables](#environment-variables)
+6. [Database Setup](#database-setup)
+7. [Post-Deployment](#post-deployment)
 
-## Prerequisites
+---
 
-### Hardware Requirements
+## Quick Start
 
-**Minimum:**
-- CPU: 4 cores
-- RAM: 8GB
-- Disk: 200GB SSD
-- Network: 100 Mbps
-
-**Recommended:**
-- CPU: 8+ cores (for parallel scanning)
-- RAM: 16GB+
-- Disk: 500GB+ SSD (varies by mirror size)
-- Network: 1 Gbps
-
-### Software Requirements
-
-- **Operating System**: Ubuntu 20.04+ or Debian 11+
-- **Root Access**: Required for installation
-- **Network Access**: Outbound to upstream repositories
-
-## System Requirements
-
-### Disk Space Planning
-
-Calculate required disk space:
-
-```text
-Total = Mirror Size + Snapshots + Scans + Logs
-```
-
-**Example for Ubuntu Jammy:**
-- Mirror (all components): ~250GB
-- Snapshots (7 days): ~1.75TB
-- Scans (30 days): ~500MB
-- Logs: ~100MB
-
-**Recommendation**: Start with 500GB, monitor, and expand as needed.
-
-### Network Requirements
-
-**Outbound:**
-- Upstream APT repositories (HTTP/HTTPS)
-- CVE database updates (HTTPS)
-
-**Inbound:**
-- Client connections (HTTPS only)
-- Management access (SSH)
-
-## Installation
-
-### 1. Update System
+### Docker (Fastest)
 
 ```bash
-sudo apt-get update
-sudo apt-get upgrade -y
-sudo apt-get install -y curl wget gnupg ca-certificates
+# Clone repository
+git clone https://github.com/safemirror/safemirror.git
+cd safemirror
+
+# Configure environment
+cp .env.prod.example .env.prod
+# Edit .env.prod with your values
+
+# Start services
+docker compose -f docker-compose.prod.yml up -d
+
+# Run migrations
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
+
+# Access at http://localhost
 ```
 
-### 2. Install Aptly
+### Kubernetes (Helm)
 
 ```bash
-# Add Aptly repository
-wget -qO - https://www.aptly.info/pubkey.txt | sudo apt-key add -
-echo "deb http://repo.aptly.info/ squeeze main" | sudo tee /etc/apt/sources.list.d/aptly.list
+# Add Bitnami repo for dependencies
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
 
-# Install
-sudo apt-get update
-sudo apt-get install -y aptly
+# Install SafeMirror
+helm install safemirror ./helm/safemirror \
+  --set config.secretKey="$(openssl rand -base64 48)" \
+  --set postgresql.auth.password="$(openssl rand -base64 24)"
 ```
 
-### 3. Install Trivy
+---
+
+## Docker Deployment
+
+### Prerequisites
+
+- Docker 24.0+
+- Docker Compose 2.20+
+- 4+ GB RAM available
+- 20+ GB disk space
+
+### Step-by-Step
+
+#### 1. Prepare Configuration
 
 ```bash
-# Install Trivy
-curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+# Create environment file
+cp .env.prod.example .env.prod
 
-# Verify installation
-trivy --version
+# Generate secret key
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(64))")
+sed -i "s/SECRET_KEY=.*/SECRET_KEY=$SECRET_KEY/" .env.prod
+
+# Generate database password
+DB_PASS=$(openssl rand -base64 24)
+sed -i "s/POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$DB_PASS/" .env.prod
 ```
 
-### 4. Install Nginx
+#### 2. Build Images
 
 ```bash
-sudo apt-get install -y nginx certbot python3-certbot-nginx
+# Build all images
+docker compose -f docker-compose.prod.yml build
+
+# Or pull pre-built (if available)
+docker compose -f docker-compose.prod.yml pull
 ```
 
-### 5. Install Python Dependencies
+#### 3. Start Services
 
 ```bash
-sudo apt-get install -y python3 python3-pip
+# Start all services
+docker compose -f docker-compose.prod.yml up -d
+
+# Check status
+docker compose -f docker-compose.prod.yml ps
+
+# View logs
+docker compose -f docker-compose.prod.yml logs -f
 ```
 
-### 6. Clone and Setup safe-apt
+#### 4. Initialize Database
 
 ```bash
-cd /opt
-sudo git clone https://github.com/taylorelley/safe-apt.git
-cd safe-apt
-sudo ./scripts/setup.sh
+# Run migrations
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
+
+# Seed default data (optional)
+docker compose -f docker-compose.prod.yml exec api python -m enterprise.db.seed
 ```
 
-## Configuration
-
-### 1. Edit Configuration File
+#### 5. Verify Deployment
 
 ```bash
-sudo nano /opt/apt-mirror-system/config.yaml
+# Check API health
+curl http://localhost/health
+
+# Expected: {"status": "healthy", "version": "0.2.0"}
 ```
 
-**Key Settings:**
+### SSL/TLS Setup
+
+See [TLS_SETUP.md](TLS_SETUP.md) for detailed instructions.
+
+Quick setup:
+```bash
+# Generate self-signed cert for testing
+mkdir -p certs
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout certs/privkey.pem -out certs/fullchain.pem \
+  -subj "/CN=localhost"
+
+# Edit nginx/conf.d/safemirror.conf to enable SSL
+# Restart nginx
+docker compose -f docker-compose.prod.yml restart nginx
+```
+
+---
+
+## Kubernetes Deployment
+
+### Prerequisites
+
+- Kubernetes 1.28+
+- Helm 3.14+
+- kubectl configured
+- Storage class for PVCs
+- Ingress controller (nginx-ingress recommended)
+
+### Step-by-Step
+
+#### 1. Add Helm Repositories
+
+```bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+```
+
+#### 2. Create Namespace
+
+```bash
+kubectl create namespace safemirror
+```
+
+#### 3. Create Secrets
+
+```bash
+# Generate secrets
+kubectl create secret generic safemirror-secrets \
+  --namespace safemirror \
+  --from-literal=secret-key="$(openssl rand -base64 48)" \
+  --from-literal=database-password="$(openssl rand -base64 24)" \
+  --from-literal=redis-password="$(openssl rand -base64 16)"
+```
+
+#### 4. Create values-prod.yaml
 
 ```yaml
-# Mirror configuration
-mirrors:
-  - name: ubuntu-jammy
-    archive_url: http://archive.ubuntu.com/ubuntu
-    distribution: jammy
-    components: [main, restricted, universe, multiverse]
-    architectures: [amd64]
+# values-prod.yaml
+secrets:
+  create: false
+  existingSecret: safemirror-secrets
 
-# Security policy
-policy:
-  min_cvss_score: 7.0
-  block_severities: [CRITICAL, HIGH]
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: safemirror.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: api
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls:
+    - secretName: safemirror-tls
+      hosts:
+        - safemirror.example.com
 
-# Scanner settings
-scanner:
-  type: trivy
-  timeout: 300
-  workers: 4
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: safemirror-secrets
+    secretKeys:
+      adminPasswordKey: database-password
+      userPasswordKey: database-password
+  primary:
+    persistence:
+      size: 50Gi
 
-# Publishing
-publishing:
-  distribution: jammy
-  gpg_key_id: YOUR_KEY_ID  # Add after GPG setup
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecret: safemirror-secrets
+    existingSecretPasswordKey: redis-password
 ```
 
-### 2. Configure Aptly
-
-Edit `~/.aptly.conf`:
-
-```json
-{
-  "rootDir": "/var/lib/aptly",
-  "downloadConcurrency": 8,
-  "architectures": ["amd64"],
-  "dependencyFollowSuggests": false,
-  "dependencyFollowRecommends": false,
-  "gpgDisableSign": false,
-  "gpgDisableVerify": false,
-  "downloadSourcePackages": false,
-  "skipContentsPublishing": false
-}
-```
-
-## Initial Setup
-
-### 1. Generate GPG Key
+#### 5. Install Chart
 
 ```bash
-# Generate key
-sudo gpg --full-generate-key
-
-# Select:
-# - RSA and RSA
-# - 4096 bits
-# - Does not expire (or set expiration)
-# - Real name: APT Mirror
-# - Email: apt@your-domain.com
-
-# List keys to get Key ID
-sudo gpg --list-keys
-# Look for line like: pub   rsa4096 2025-11-19 [SC]
-#                           ABCD1234ABCD1234ABCD1234ABCD1234ABCD1234
-
-# Export public key
-sudo gpg --armor --export YOUR_KEY_ID > /var/lib/aptly/public/apt-mirror.gpg
+helm install safemirror ./helm/safemirror \
+  --namespace safemirror \
+  -f values-prod.yaml
 ```
 
-### 2. Create Aptly Mirror
+#### 6. Verify Deployment
 
 ```bash
-# Create mirror
-sudo aptly mirror create ubuntu-jammy \
-    http://archive.ubuntu.com/ubuntu \
-    jammy main restricted universe multiverse
+# Check pods
+kubectl get pods -n safemirror
 
-# Initial sync (this takes time!)
-sudo aptly mirror update ubuntu-jammy
+# Check ingress
+kubectl get ingress -n safemirror
+
+# View logs
+kubectl logs -n safemirror -l app.kubernetes.io/component=api
 ```
 
-### 3. Configure SSL Certificate
-
-#### Option A: Let's Encrypt (Recommended)
+### Scaling
 
 ```bash
-# Obtain certificate
-sudo certbot --nginx -d apt.yourdomain.com
+# Scale API replicas
+kubectl scale deployment safemirror-api -n safemirror --replicas=5
 
-# Auto-renewal is configured by default
+# Or via HPA (already configured)
+kubectl get hpa -n safemirror
 ```
 
-#### Option B: Self-Signed (Testing Only)
+---
 
+## Cloud Deployments
+
+### AWS (EKS)
+
+#### Prerequisites
+- EKS cluster
+- AWS Load Balancer Controller
+- EBS CSI driver
+
+#### RDS Setup
 ```bash
-sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/ssl/private/apt-mirror.key \
-    -out /etc/ssl/certs/apt-mirror.crt
+# Create RDS PostgreSQL instance
+aws rds create-db-instance \
+  --db-instance-identifier safemirror-db \
+  --db-instance-class db.r6g.large \
+  --engine postgres \
+  --engine-version 16 \
+  --master-username safemirror \
+  --master-user-password "YOUR_PASSWORD" \
+  --allocated-storage 100
+
+# Get endpoint
+aws rds describe-db-instances \
+  --db-instance-identifier safemirror-db \
+  --query 'DBInstances[0].Endpoint.Address'
 ```
 
-### 4. Configure Nginx
-
+#### ElastiCache Setup
 ```bash
-# Edit configuration
-sudo nano /etc/nginx/sites-available/apt-mirror
-
-# Update server_name
-server_name apt.yourdomain.com;
-
-# If using self-signed cert, update paths
-ssl_certificate /etc/ssl/certs/apt-mirror.crt;
-ssl_certificate_key /etc/ssl/private/apt-mirror.key;
-
-# Enable site
-sudo ln -s /etc/nginx/sites-available/apt-mirror /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+aws elasticache create-replication-group \
+  --replication-group-id safemirror-redis \
+  --replication-group-description "SafeMirror Redis" \
+  --engine redis \
+  --cache-node-type cache.r6g.large \
+  --num-cache-clusters 2
 ```
 
-### 5. First Pipeline Run
-
-```bash
-# Run pipeline manually
-sudo /opt/apt-mirror-system/scripts/run-pipeline.sh
-
-# Monitor progress
-tail -f /opt/apt-mirror-system/logs/pipeline-*.log
-```
-
-## Security Hardening
-
-### 1. Firewall Configuration
-
-```bash
-# Enable UFW
-sudo ufw enable
-
-# Allow SSH (change port if needed)
-sudo ufw allow 22/tcp
-
-# Allow HTTPS only (no HTTP in production)
-sudo ufw allow 443/tcp
-
-# Verify rules
-sudo ufw status
-```
-
-### 2. SSH Hardening
-
-```bash
-# Edit SSH config
-sudo nano /etc/ssh/sshd_config
-
-# Recommended settings:
-PermitRootLogin no
-PasswordAuthentication no
-PubkeyAuthentication yes
-X11Forwarding no
-
-# Restart SSH
-sudo systemctl restart sshd
-```
-
-### 3. File Permissions
-
-```bash
-# Restrict config file
-sudo chmod 600 /opt/apt-mirror-system/config.yaml
-
-# Restrict GPG keys
-sudo chmod 700 ~/.gnupg
-
-# Restrict scripts
-sudo chown root:root /opt/apt-mirror-system/scripts/*
-sudo chmod 750 /opt/apt-mirror-system/scripts/*
-```
-
-### 4. AppArmor/SELinux
-
-Consider enabling AppArmor or SELinux profiles for:
-- nginx
-- aptly
-- Python processes
-
-### 5. Audit Logging
-
-Enable system audit logging:
-
-```bash
-sudo apt-get install -y auditd
-sudo systemctl enable auditd
-sudo systemctl start auditd
-```
-
-## Monitoring
-
-### 1. Log Monitoring
-
-**Centralized Logging:**
-
-```bash
-# Install rsyslog or journald forwarding
-# Configure to send to central log server
-
-# Example: Forward to remote syslog
-echo "*.* @logserver.yourdomain.com:514" | sudo tee -a /etc/rsyslog.conf
-sudo systemctl restart rsyslog
-```
-
-**Log Rotation:**
-
-```bash
-# Create logrotate config
-sudo nano /etc/logrotate.d/safe-apt
-
-# Add:
-/opt/apt-mirror-system/logs/*.log {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0644 root root
-}
-```
-
-### 2. Disk Space Monitoring
-
-```bash
-# Create monitoring script
-sudo nano /opt/apt-mirror-system/scripts/check-disk.sh
-```
-
-```bash
-#!/bin/bash
-THRESHOLD=90
-USAGE=$(df -h /var/lib/aptly | tail -1 | awk '{print $5}' | sed 's/%//')
-
-if [ "$USAGE" -gt "$THRESHOLD" ]; then
-    echo "ALERT: Disk usage at ${USAGE}%"
-    # Send notification
-fi
-```
-
-### 3. Service Health Checks
-
-```bash
-# Add to cron
-echo "*/5 * * * * root /opt/apt-mirror-system/scripts/check-health.sh" | sudo tee -a /etc/cron.d/safe-apt-monitoring
-```
-
-### 4. Metrics Collection
-
-Consider integrating with:
-- **Prometheus**: Metrics collection
-- **Grafana**: Visualization
-- **Nagios/Zabbix**: Alerting
-
-## Maintenance
-
-### Daily Tasks
-
-Automated by cron:
-- Pipeline sync and scan (2:00 AM)
-- Nightly rescan (3:00 AM)
-
-### Weekly Tasks
-
-```bash
-# Review logs
-sudo grep ERROR /opt/apt-mirror-system/logs/*.log
-
-# Check disk usage
-df -h /var/lib/aptly
-
-# Review blocked packages
-sudo tail -100 /opt/apt-mirror-system/logs/scanner.log | grep BLOCKED
-```
-
-### Monthly Tasks
-
-```bash
-# Update scanner database manually
-sudo trivy image --download-db-only
-
-# Clean old snapshots
-sudo aptly snapshot list | grep staging- | sort | head -n -7 | xargs -I {} sudo aptly snapshot drop {}
-
-# Clean old scans
-find /opt/apt-mirror-system/scans -name "*.json" -mtime +30 -delete
-
-# Review security policy effectiveness
-# Count approved vs blocked packages
-jq -r '.status' /opt/apt-mirror-system/scans/*.json 2>/dev/null | sort | uniq -c
-
-# Or review recent scan statistics
-grep -E "BLOCKED|APPROVED" /opt/apt-mirror-system/logs/scanner.log | tail -100
-```
-
-### Updates
-
-```bash
-# Update safe-apt
-cd /opt/safe-apt
-sudo git pull
-sudo pip3 install -r requirements.txt
-
-# Update Trivy
-sudo trivy --download-db-only
-
-# Update system packages
-sudo apt-get update
-sudo apt-get upgrade -y
-```
-
-## Troubleshooting
-
-### Pipeline Fails
-
-**Check logs:**
-```bash
-tail -100 /opt/apt-mirror-system/logs/pipeline-*.log
-```
-
-**Common issues:**
-1. **Upstream unavailable**: Wait and retry, or use alternate mirror
-2. **Disk full**: Clean old snapshots or expand disk
-3. **Scanner timeout**: Increase timeout in config.yaml
-4. **GPG signing failed**: Check GPG key and passphrase
-
-### No Packages Approved
-
-**Diagnose:**
-```bash
-# Check scan results
-ls -l /opt/apt-mirror-system/scans/
-
-# Review policy
-cat /opt/apt-mirror-system/config.yaml | grep -A 5 policy
-
-# Check specific scan
-cat /opt/apt-mirror-system/scans/package-name_*.json | jq .
-```
-
-**Solutions:**
-1. Adjust CVSS threshold
-2. Remove HIGH from blocked_severities
-3. Add allowed_cves for false positives
-
-### Clients Can't Connect
-
-**Check nginx:**
-```bash
-sudo systemctl status nginx
-sudo nginx -t
-tail -50 /var/log/nginx/error.log
-```
-
-**Check SSL:**
-```bash
-sudo certbot certificates
-curl -I https://apt.yourdomain.com/health
-```
-
-**Check publication:**
-```bash
-aptly publish list
-ls -l /var/lib/aptly/public/dists/
-```
-
-## Disaster Recovery
-
-### Backup Strategy
-
-**What to backup:**
-1. Configuration: `/opt/apt-mirror-system/config.yaml`
-2. GPG keys: `~/.gnupg/`
-3. Aptly database: `/var/lib/aptly/db/`
-4. Approved lists: `/opt/apt-mirror-system/approvals/`
-5. Recent scans: `/opt/apt-mirror-system/scans/`
-
-**Backup script:**
-
-```bash
-#!/bin/bash
-BACKUP_DIR="/backup/safe-apt/$(date +%Y%m%d)"
-mkdir -p "${BACKUP_DIR}"
-
-# Config
-cp /opt/apt-mirror-system/config.yaml "${BACKUP_DIR}/"
-
-# GPG keys
-tar czf "${BACKUP_DIR}/gnupg.tar.gz" ~/.gnupg/
-
-# Aptly database
-tar czf "${BACKUP_DIR}/aptly-db.tar.gz" /var/lib/aptly/db/
-
-# Approvals and recent scans
-tar czf "${BACKUP_DIR}/data.tar.gz" /opt/apt-mirror-system/approvals/ /opt/apt-mirror-system/scans/
-
-# Keep 30 days
-find /backup/safe-apt/ -type d -mtime +30 -exec rm -rf {} +
-```
-
-### Recovery Procedure
-
-1. **Install fresh system** following installation steps
-2. **Restore configuration**: Copy config.yaml
-3. **Restore GPG keys**: Extract gnupg.tar.gz to ~/.gnupg
-4. **Restore Aptly database**: Extract aptly-db.tar.gz
-5. **Restore data**: Extract data.tar.gz
-6. **Rebuild mirror**: Run sync if needed
-7. **Test**: Verify publication works
-
-### High Availability
-
-For HA deployment:
-
-1. **Primary/Secondary Setup**:
-   - Two identical servers
-   - Shared storage (NFS/GlusterFS) for /var/lib/aptly
-   - Keepalived for VIP failover
-
-2. **Load Balancing**:
-   - Multiple read-only mirrors
-   - HAProxy or nginx load balancer
-   - Single primary for syncing/scanning
-
-## Performance Tuning
-
-### Aptly Optimization
-
-```json
-{
-  "downloadConcurrency": 16,
-  "skipContentsPublishing": true
-}
-```
-
-### Scanner Optimization
-
+#### Helm Values for AWS
 ```yaml
-scanner:
-  workers: 8  # Increase for more CPU cores
-  timeout: 600  # Increase for large packages
+# values-aws.yaml
+postgresql:
+  enabled: false
+
+externalDatabase:
+  host: safemirror-db.xxxxx.us-east-1.rds.amazonaws.com
+  port: 5432
+  database: safemirror
+  username: safemirror
+  existingSecret: safemirror-secrets
+  existingSecretPasswordKey: database-password
+
+redis:
+  enabled: false
+
+externalRedis:
+  host: safemirror-redis.xxxxx.cache.amazonaws.com
+  port: 6379
+
+ingress:
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...
 ```
 
-### Nginx Optimization
+### GCP (GKE)
 
-```nginx
-# Enable caching
-proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=apt_cache:10m max_size=10g;
+#### Cloud SQL Setup
+```bash
+gcloud sql instances create safemirror-db \
+  --database-version=POSTGRES_16 \
+  --tier=db-custom-4-16384 \
+  --region=us-central1
+
+gcloud sql users set-password postgres \
+  --instance=safemirror-db \
+  --password=YOUR_PASSWORD
 ```
 
-## Compliance and Auditing
+#### Memorystore Setup
+```bash
+gcloud redis instances create safemirror-redis \
+  --size=2 \
+  --region=us-central1 \
+  --redis-version=redis_7_0
+```
 
-### Audit Log Review
+#### Helm Values for GCP
+```yaml
+# values-gcp.yaml
+postgresql:
+  enabled: false
+
+externalDatabase:
+  host: /cloudsql/PROJECT:REGION:safemirror-db
+  port: 5432
+  database: safemirror
+  username: postgres
+
+# Add Cloud SQL proxy sidecar to deployments
+```
+
+### Azure (AKS)
+
+#### Azure Database for PostgreSQL
+```bash
+az postgres flexible-server create \
+  --resource-group safemirror-rg \
+  --name safemirror-db \
+  --admin-user safemirror \
+  --admin-password "YOUR_PASSWORD" \
+  --sku-name Standard_D4s_v3 \
+  --tier GeneralPurpose \
+  --version 16
+```
+
+#### Azure Cache for Redis
+```bash
+az redis create \
+  --resource-group safemirror-rg \
+  --name safemirror-redis \
+  --sku Standard \
+  --vm-size c1
+```
+
+---
+
+## Environment Variables
+
+### Required Variables
+
+| Variable | Description |
+|----------|-------------|
+| `SECRET_KEY` | JWT signing key (64+ chars) |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+
+### Optional Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEBUG` | `false` | Enable debug mode |
+| `APP_NAME` | `SafeMirror Enterprise` | Application name |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | JWT token expiry |
+| `CORS_ORIGINS` | `[]` | Allowed CORS origins |
+| `SMTP_HOST` | - | SMTP server |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USER` | - | SMTP username |
+| `SMTP_PASSWORD` | - | SMTP password |
+| `SMTP_FROM_EMAIL` | `noreply@safemirror.local` | From address |
+
+---
+
+## Database Setup
+
+### External PostgreSQL
+
+Requirements:
+- PostgreSQL 14+
+- Database created for SafeMirror
+- User with full privileges on database
+
+```sql
+-- Create database and user
+CREATE USER safemirror WITH PASSWORD 'your_password';
+CREATE DATABASE safemirror OWNER safemirror;
+GRANT ALL PRIVILEGES ON DATABASE safemirror TO safemirror;
+```
+
+### Running Migrations
 
 ```bash
-# Review all blocked packages
-grep BLOCKED /opt/apt-mirror-system/logs/*.log
+# Docker
+docker compose -f docker-compose.prod.yml exec api alembic upgrade head
 
-# Check policy changes
-git log --follow /opt/apt-mirror-system/config.yaml
-
-# Scan result summary
-jq -r '.status' /opt/apt-mirror-system/scans/*.json | sort | uniq -c
+# Kubernetes
+kubectl exec -it deployment/safemirror-api -n safemirror -- alembic upgrade head
 ```
 
-### Compliance Reporting
-
-Generate monthly reports:
+### Database Backup
 
 ```bash
-# Packages scanned
-ls -1 /opt/apt-mirror-system/scans/*.json | wc -l
+# Docker
+docker compose -f docker-compose.prod.yml exec db \
+  pg_dump -U safemirror -F c safemirror > backup.dump
 
-# Blocked vs approved
-jq -r '.status' /opt/apt-mirror-system/scans/*.json | sort | uniq -c
-
-# Critical CVEs found
-jq -r '.vulnerabilities[] | select(.severity=="CRITICAL") | .cve_id' /opt/apt-mirror-system/scans/*.json | sort | uniq
+# Kubernetes
+kubectl exec -it statefulset/safemirror-postgresql -n safemirror -- \
+  pg_dump -U safemirror -F c safemirror > backup.dump
 ```
 
-## Additional Resources
+---
 
-- [Aptly Documentation](https://www.aptly.info/doc/)
-- [Trivy Documentation](https://aquasecurity.github.io/trivy/)
-- [Nginx Hardening Guide](https://www.nginx.com/resources/wiki/start/topics/tutorials/config_pitfalls/)
-- [Ubuntu Security Guide](https://ubuntu.com/security/certifications/docs/2204)
+## Post-Deployment
 
-## Support
+### 1. Create First Admin
 
-For issues and questions:
-- [GitHub Issues](https://github.com/taylorelley/safe-apt/issues)
-- Documentation: See README.md and DESIGN.md
+```bash
+curl -X POST https://safemirror.example.com/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@example.com",
+    "password": "SecurePassword123!",
+    "name": "Admin",
+    "org_name": "My Organization"
+  }'
+```
+
+### 2. Configure SSO (Optional)
+
+Navigate to Settings > SSO in the UI or use the API.
+
+### 3. Set Up Monitoring
+
+- Enable Prometheus metrics
+- Configure alerts for health checks
+- Set up log aggregation
+
+### 4. Security Checklist
+
+- [ ] TLS/HTTPS enabled
+- [ ] Strong SECRET_KEY set
+- [ ] DEBUG=false
+- [ ] Firewall configured
+- [ ] Backups scheduled
+- [ ] Monitoring enabled
+
+---
+
+*For detailed administration, see [ADMIN_GUIDE.md](ADMIN_GUIDE.md)*
