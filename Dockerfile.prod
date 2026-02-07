@@ -44,6 +44,7 @@ RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
 
 # Copy application code
 COPY enterprise/ ./enterprise/
+COPY src/ ./src/
 COPY alembic.ini ./
 COPY scripts/ ./scripts/
 
