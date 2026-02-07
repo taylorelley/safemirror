@@ -109,7 +109,7 @@ class ApiClient {
     formData.append('username', credentials.username);
     formData.append('password', credentials.password);
 
-    const response = await fetch(`${this.baseUrl}/auth/token`, {
+    const response = await fetch(`${this.baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formData,
