@@ -65,8 +65,6 @@ class ApiClient {
         }
         return retryResponse.json();
       }
-      // Redirect to login
-      window.location.href = '/login';
       throw new Error('Unauthorized');
     }
 

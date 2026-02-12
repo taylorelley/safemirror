@@ -24,7 +24,7 @@ export default function LoginPage() {
 
     try {
       await login({ username, password });
-      router.push('/');
+      router.push('/packages');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
